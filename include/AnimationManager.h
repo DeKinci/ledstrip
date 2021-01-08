@@ -45,7 +45,7 @@ public:
         this->size = size;
         this->leds = new CRGB[size];
         FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, size).setCorrection(TypicalSMD5050);
-        FastLED.setBrightness(5);
+        FastLED.setBrightness(100);
         FastLED.clear(true);
         return CallResult<void*>(nullptr);
     }
@@ -56,6 +56,7 @@ public:
     void slower();
     CallResult<void*> draw();
     void scheduleReload();
+    CallResult<void*> select(String& shaderName);
 
     virtual ~AnimationManager();
 };

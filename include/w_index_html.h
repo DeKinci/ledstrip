@@ -4,37 +4,7 @@
 #include<Arduino.h>
 
 const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html>
-<head>
-  <title>ESP Web Server</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
-  <style>
-    html {font-family: Arial; display: inline-block; text-align: center;}
-    h2 {font-size: 3.0rem;}
-    p {font-size: 3.0rem;}
-    body {max-width: 600px; margin:0px auto; padding-bottom: 25px;}
-    .switch {position: relative; display: inline-block; width: 120px; height: 68px} 
-    .switch input {display: none}
-    .slider {position: absolute; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; border-radius: 6px}
-    .slider:before {position: absolute; content: ""; height: 52px; width: 52px; left: 8px; bottom: 8px; background-color: #fff; -webkit-transition: .4s; transition: .4s; border-radius: 3px}
-    input:checked+.slider {background-color: #b30000}
-    input:checked+.slider:before {-webkit-transform: translateX(52px); -ms-transform: translateX(52px); transform: translateX(52px)}
-  </style>
-</head>
-<body>
-  <h2>ESP Web Server</h2>
-  %BUTTONPLACEHOLDER%
-  
-<script>function toggleCheckbox(element) {
-  var xhr = new XMLHttpRequest();
-  if(element.checked){ xhr.open("GET", "/update?output="+element.id+"&state=1", true); }
-  else { xhr.open("GET", "/update?output="+element.id+"&state=0", true); }
-  xhr.send();
-}
-</script>
-</body>
-</html>
+<!DOCTYPE html><html lang="en"> <head> <meta charset="UTF-8"/> <meta name="viewport" content="width=device-width, initial-scale=1.0"/> <title>Ducky led strip(tease)</title> <script src="https://cdn.jsdelivr.net/gh/alpinejs/alpine@v2.3.5/dist/alpine.min.js" defer ></script> <style type="text/css"> body{font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif; display: flex; flex-direction: column; align-items: center; margin-top: 1rem;}.app{min-width: 300px; max-width: 700px; border-radius: 2px; padding: 20px; font-size: 1.125rem; box-shadow: 0 10px 20px rgba(0, 0, 0, 0.19), 0 6px 6px rgba(0, 0, 0, 0.23);}h1{font-size: 1.5rem;}ul{margin: 1rem 0; padding: 0;}li{list-style: none; cursor: pointer; padding: 0.5rem; border-radius: 2px; transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);}li:hover{box-shadow: 0 3px 6px rgba(0, 0, 0, 0.16), 0 3px 6px rgba(0, 0, 0, 0.23);}ul li::before{content: "◻"; display: inline-block; margin-right: 0.2rem;}.add-shader{display: flex;}.add-shader input{flex: 1; padding: 0.4rem; padding-left: 0.5rem;}.add-shader button{margin-left: 0.5rem; padding: 0 10px; background: #3182ce; color: white; border: none; transition: all 0.3s;}.add-shader button:hover{background: #2a4365; transition: all 0.3s;}.title{margin-left: 10px; margin-right: 10px;}.delete-shader{color: red; font-weight: bold; font-size: 1.25rem; float: right;}.completed .title{/* text-decoration: line-through; */}ul li.completed::before{content: "✔";}*, *::before, *::after{box-sizing: border-box;}ul[class], ol[class]{padding: 0;}body, h1, h2, h3, h4, p, ul[class], ol[class], li, figure, figcaption, blockquote, dl, dd{margin: 0;}body{/* min-height: 100vh; */ scroll-behavior: smooth; text-rendering: optimizeSpeed; line-height: 1.5;}ul[class], ol[class]{list-style: none;}a:not([class]){text-decoration-skip-ink: auto;}img{max-width: 1000; display: block;}article > * + *{margin-top: 1em;}input, button, textarea, select{font: inherit;}@media (prefers-reduced-motion: reduce){*{animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important;}}</style> <style type="text/css" media="screen"> #editor{/* position: relative; */ /* top: 0; right: 0; bottom: 0; left: 0; */ height: 300; width: 600;}</style> </head> <body> <div x-data="shaders()" x-init="listShaders()" class="app"> <h1>Select mode</h1> <ul> <template x-for="shader in shaders" :key="shader.name"> <li @click="selectShader(shader)" :class="{'completed': shader.selected}" > <span x-text="shader.name" class="title"></span> <span @click="deleteShader(shader.name)" class="delete-shader">&times;</span> </li></template> </ul> <div class="add-shader"> <input type="text" x-model="inputValue" placeholder="NewShader"/> <button @click="addShader()">New</button> </div><div> <div id="editor"> function foo(items){var x="All this is syntax highlighted"; return x;}</div></div></div><script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js" type="text/javascript" charset="utf-8" crossorigin="anonymous"></script> <script>var editor=ace.edit("editor"); editor.setTheme("ace/theme/monokai"); editor.session.setMode("ace/mode/lua"); </script> <script>function shaders(){return{shaders: [], currentShader: null, inputValue: "", selectShader: function(s){if (s===this.currentShader){return;}this.currentShader.selected=false; this.currentShader=s; this.currentShader.selected=true; fetch("http://%SELF_IP%/api/show/" + s.name)}, addShader: function(){if (!this.inputValue){return;}this.shaders.push({name: this.inputValue, selected: false}); this.inputValue="";}, deleteShader: function(id){fetch("http://%SELF_IP%/api/shader/" + id,{method: 'DELETE'}) .then(r=> this.shaders=this.shaders.filter(shader=> shader.name !==id));}, listShaders: function(){fetch("http://%SELF_IP%/api/shader") .then(response=> response.json()) .then(data=>{this.shaders=data.shader.map(s=>{return{name: s, selected: false}}); this.currentShader=this.shaders[0]; this.currentShader.selected=true;});}};}</script> </body></html>
 )rawliteral";
 
 #endif //W_MAIN_H

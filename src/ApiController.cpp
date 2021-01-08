@@ -56,3 +56,12 @@ void ApiController::onDeleteShader(String& shader, AsyncWebServerRequest *reques
         return;
     }
 }
+
+void ApiController::onShow(String& shader, AsyncWebServerRequest *request) {
+    CallResult<void*> result = animationManager->select(shader);
+    if (result.hasError()) {
+        request->send(result.getCode(), "text/plain", result.getMessage());
+        return;
+    }
+    request->send(200);
+}

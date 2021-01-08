@@ -15,6 +15,8 @@ public:
     void onGetShader(String& shader, AsyncWebServerRequest *request);
     void onDeleteShader(String& shader, AsyncWebServerRequest *request);
 
+    void onShow(String& shader, AsyncWebServerRequest *request);
+
 private:
     ShaderStorage* shaderStorage;
     AnimationManager *animationManager;

@@ -33,6 +33,26 @@ void AnimationManager::slower() {
         speed -= 10;
 }
 
+CallResult<void*> AnimationManager::select(String& shaderName) {
+    uint16_t shaderSize = shaders->size();
+    uint16_t foundShaderIndex = -1;
+    for (int i = 0; i < shaderSize; i++) {
+        if ((*shaders)[i] == shaderName) {
+            foundShaderIndex = i;
+            break;
+        }
+    }
+    if (foundShaderIndex == -1) {
+        return CallResult<void*>(nullptr, 404, "No such shader");
+    }
+    currentAnimationShaderIndex = foundShaderIndex;
+    CallResult<LuaAnimation*> loadResult = loadCached((*shaders)[currentAnimationShaderIndex]);
+    if (loadResult.hasError()) {
+        return CallResult<void*>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
+    }
+    currentAnimation = loadResult.getValue();
+}
+
 CallResult<void*> AnimationManager::draw() {
     if (leds == nullptr) {
         return CallResult<void*>(nullptr, 500, "Leds were not connected programmaticaly");
