@@ -7,6 +7,7 @@
 #include "ShaderStorage.h"
 #include "GlobalAnimationEnv.h"
 #include "LuaAnimation.h"
+#include "SelectAnimationListener.h"
 
 #define CACHE_SIZE 5
 
@@ -20,7 +21,7 @@ private:
     GlobalAnimationEnv* globalAnimationEnv;
     ShaderStorage *shaderStorage;
 
-    std::vector<String>* shaders;
+    std::vector<String>* shaders = new std::vector<String>();
     std::vector<LuaAnimation*>* loadedAnimations;
 
     uint16_t currentAnimationShaderIndex = 0;
@@ -28,6 +29,9 @@ private:
     long lastUpdate = 0;
 
     bool toReload = false;
+
+    SelectAnimationListener* listener;
+    void setCurrentAnimation(LuaAnimation* animation);
 
     CallResult<LuaAnimation*> loadCached(String& shaderName);
     CallResult<void*> reload();
@@ -57,6 +61,8 @@ public:
     CallResult<void*> draw();
     void scheduleReload();
     CallResult<void*> select(String& shaderName);
+    String getCurrent();
+    void setListener(SelectAnimationListener* listener);
 
     virtual ~AnimationManager();
 };

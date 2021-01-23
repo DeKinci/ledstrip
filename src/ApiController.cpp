@@ -8,7 +8,13 @@ ApiController::ApiController(ShaderStorage* shaderStorage, AnimationManager *ani
 }
 
 void ApiController::onAddShader(AsyncWebServerRequest *request, JsonVariant &json) {
-    CallResult<void*> storeResult = shaderStorage->storeShader(json["name"].as<String>(), json["shader"].as<String>());
+    String name = json["name"].as<String>();
+    String shader = json["shader"].as<String>();
+    Serial.println("Received shader " + name);
+    Serial.println("*** BEGIN SHADER ***");
+    Serial.println(shader);
+    Serial.println("*** END SHADER ***");
+    CallResult<void*> storeResult = shaderStorage->storeShader(name, shader);
     if (!storeResult.hasError()) {
         animationManager->scheduleReload();
         request->send(200);
@@ -42,8 +48,15 @@ void ApiController::onGetShader(String& shader, AsyncWebServerRequest *request) 
     if (result.hasError()) {
         request->send(result.getCode(), "text/plain", result.getMessage());
         return;
-    } 
-    request->send(200, "application/json", "\"" + result.getValue() + "\"");
+    }
+
+    uint16_t size = 200 + result.getValue().length();
+    DynamicJsonDocument json(size);
+    json["shader"] = result.getValue();
+
+    String response;
+    serializeJson(json, response);
+    request->send(200, "application/json", response);
 }
 
 void ApiController::onDeleteShader(String& shader, AsyncWebServerRequest *request) {
@@ -64,4 +77,15 @@ void ApiController::onShow(String& shader, AsyncWebServerRequest *request) {
         return;
     }
     request->send(200);
+}
+
+void ApiController::onGetShow(AsyncWebServerRequest *request) {
+    String result = animationManager->getCurrent();
+    uint16_t size = 100 + result.length();
+    DynamicJsonDocument json(size);
+    json["name"] = result;
+
+    String response;
+    serializeJson(json, response);
+    request->send(200, "application/json", response);
 }

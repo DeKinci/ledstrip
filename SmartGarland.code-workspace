@@ -51,7 +51,14 @@
 			"string": "cpp",
 			"random": "cpp",
 			"list": "cpp",
-			"iostream": "cpp"
+			"iostream": "cpp",
+			"chrono": "cpp",
+			"forward_list": "cpp",
+			"optional": "cpp",
+			"ratio": "cpp",
+			"string_view": "cpp",
+			"mutex": "cpp",
+			"thread": "cpp"
 		}
 	}
 }

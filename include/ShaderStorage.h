@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "CallResult.h"
+#include "EditAnimationListener.h"
 
 class ShaderStorage {
 public:
@@ -16,9 +17,12 @@ public:
     bool deleteShader(const String& name);
     CallResult<std::vector<String>*> listShaders() const;
 
+    void setListener(EditAnimationListener *listener);
+
 private:
     bool begin();
     String shaderFolderFile(const String& name) const;
+    EditAnimationListener *listener;
 };
 
 #endif //SHADER_STORAGE_H

@@ -50,7 +50,8 @@ CallResult<void*> AnimationManager::select(String& shaderName) {
     if (loadResult.hasError()) {
         return CallResult<void*>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
     }
-    currentAnimation = loadResult.getValue();
+    setCurrentAnimation(loadResult.getValue());
+    return CallResult<void*>(nullptr, 200);
 }
 
 CallResult<void*> AnimationManager::draw() {
@@ -89,9 +90,7 @@ CallResult<void*> AnimationManager::reload() {
         delete anim;
     }
     loadedAnimations->clear();
-    if (shaders != nullptr) {
-        delete shaders;
-    }
+    delete shaders;
 
     CallResult<std::vector<String>*> shadersResult = shaderStorage->listShaders();
     if (shadersResult.hasError()) {
@@ -100,7 +99,7 @@ CallResult<void*> AnimationManager::reload() {
     shaders = shadersResult.getValue();
     if (shaders->size() == 0) {
         currentAnimationShaderIndex = 0;
-        currentAnimation = nullptr;
+        setCurrentAnimation(nullptr);
         return CallResult<void*>(nullptr, 200);
     }
 
@@ -112,7 +111,7 @@ CallResult<void*> AnimationManager::reload() {
     if (loadResult.hasError()) {
         return CallResult<void*>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
     }
-    currentAnimation = loadResult.getValue();
+    setCurrentAnimation(loadResult.getValue());
     Serial.println("Shaders reload finished");
     return CallResult<void*>(nullptr, 200);
 }
@@ -146,4 +145,27 @@ CallResult<LuaAnimation*> AnimationManager::loadCached(String& shaderName) {
     }
 
     return CallResult<LuaAnimation *>(animation, 200);
+}
+
+String AnimationManager::getCurrent() {
+    if (currentAnimation == nullptr) {
+        return "";
+    } else {
+        return currentAnimation->getName();
+    }
+}
+
+void AnimationManager::setListener(SelectAnimationListener* listener) {
+    AnimationManager::listener = listener;
+}
+
+void AnimationManager::setCurrentAnimation(LuaAnimation* animation) {
+    currentAnimation = animation;
+    if (listener != nullptr) {
+        if (animation != nullptr) {
+            listener->animationSelected(animation->getName());
+        } else {
+            listener->animationSelected("");
+        }
+    }
 }

@@ -3,6 +3,7 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPAsyncWiFiManager.h>
+#include <ESPmDNS.h>
 
 #include "LuaAnimation.h"
 
@@ -11,6 +12,7 @@
 #include "w_index_html.h"
 #include "ShaderStorage.h"
 #include "ApiController.h"
+#include "SocketController.h"
 #include "Test.h"
 
 #define NUM_LEDS 1
@@ -30,6 +32,7 @@ GlobalAnimationEnv *globalAnimationEnv;
 ShaderStorage* shaderStorage;
 ApiController* apiController;
 AnimationManager* anime;
+SocketController *socket;
 
 void handleButtons();
 
@@ -56,11 +59,16 @@ void setup() {
   Serial.begin(115200);
   WiFi.disconnect();
   WiFi.mode(WIFI_OFF);
-
   WiFi.mode(WIFI_STA);
   AsyncWiFiManager wm(&server,&dnsServer);    
   wm.autoConnect("Ducky LED");
   Serial.println("Connected to wifi");
+
+  if(!MDNS.begin("duckyled")) {
+     Serial.println("Error starting mDNS");
+     return;
+  }
+
   server.reset();
 
   // pinMode(LFT, INPUT);
@@ -69,6 +77,7 @@ void setup() {
   // pinMode(RGT, INPUT);
   // attachInterrupt(digitalPinToInterrupt(RGT), callRight, RISING);
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
+  DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
 
   server.onNotFound([](AsyncWebServerRequest *request) {
@@ -90,16 +99,16 @@ void setup() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", index_html, processor);
   });
+
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/css", style_css);
+  });
   
   auto shaderPost = new AsyncCallbackJsonWebHandler("/api/shader", [](AsyncWebServerRequest *request, JsonVariant &json) {
     apiController->onAddShader(request, json);
   });
   shaderPost->setMethod(HTTP_POST);
   server.addHandler(shaderPost);
-
-  server.on("/api/shader", HTTP_GET, [] (AsyncWebServerRequest *request){
-    apiController->onListShaders(request);
-  });
 
   server.on("^\\/api\\/show\\/([a-zA-Z0-9_-]+)$", HTTP_GET, [] (AsyncWebServerRequest *request) {
     String path = request->pathArg(0);
@@ -116,21 +125,38 @@ void setup() {
     apiController->onDeleteShader(path, request);
   });
 
-  server.begin();
+  server.on("/api/shader", HTTP_GET, [] (AsyncWebServerRequest *request){
+    apiController->onListShaders(request);
+  });
+
+  server.on("/api/show", HTTP_GET, [] (AsyncWebServerRequest *request){
+    apiController->onGetShow(request);
+  });
 
   globalAnimationEnv = new GlobalAnimationEnv();
   shaderStorage = new ShaderStorage();
   anime = new AnimationManager(shaderStorage, globalAnimationEnv);
+  socket = new SocketController(anime);
+  socket->bind(server);
+
+  anime->setListener(socket);
+  shaderStorage->setListener(socket);
+
   apiController = new ApiController(shaderStorage, anime);
+
   status = anime->connect<LED_PIN>(1);
   while (status.hasError()) {
     Serial.println(status.getMessage());
     delay(1000);
     status = anime->connect<LED_PIN>(1);
   }
+
+  server.begin();
+  Serial.println("http://duckyled.local/");
 }
 
 void loop() {
+  socket->cleanUp();
   mls = millis();
   call++;
 

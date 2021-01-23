@@ -3,97 +3,145 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Ducky led strip(tease)</title>
-        <script
-        src="https://cdn.jsdelivr.net/gh/alpinejs/alpine@v2.3.5/dist/alpine.min.js"
-        defer
-        ></script>
+        <title>Ducky LED</title>
+        <script src="https://cdn.jsdelivr.net/gh/alpinejs/alpine@v2.3.5/dist/alpine.min.js" defer></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js" type="text/javascript" charset="utf-8" crossorigin="anonymous"></script>
         <link rel="stylesheet" href="style.css" />
         <style type="text/css" media="screen">
-            #editor { 
-                /* position: relative; */
-                /* top: 0;
-                right: 0;
-                bottom: 0;
-                left: 0; */
-                height: 300;
-                width: 600;
-            }
+            
         </style>
     </head>
     <body>
-        <div x-data="shaders()" x-init="listShaders()" class="app">
+        <div x-data="shaders()" x-init="initialize()" class="app">
             <h1>Select mode</h1>
             <ul>
                 <template x-for="shader in shaders" :key="shader.name">
-                <li
-                    @click="selectShader(shader)"
-                    :class="{'completed': shader.selected}"
-                >
-                    <span x-text="shader.name" class="title"></span>
+                <li :class="{'completed': shader.selected}">
+                    <span @click="selectShader(shader)" x-text="shader.name" class="title"></span>
                     <span @click="deleteShader(shader.name)" class="delete-shader">&times;</span>
+                    <span @click="editShader(shader.name)" class="edit-shader">&equiv;</span>
                 </li>
                 </template>
             </ul>
             <div class="add-shader">
                 <input type="text" x-model="inputValue" placeholder="NewShader" />
-                <button @click="addShader()">New</button>
+                <button @click="addShader()">Upload</button>
             </div>
+            <br/>
             <div>
-                <div id="editor">
-                    function foo(items) {
-                        var x = "All this is syntax highlighted";
-                        return x;
-                    }
-                </div>
+                <div id="editor" :class="{'hidden': !inputValue}">-- example function of white color
+function color(position) 
+    return {255, 0, 255} 
+end
+</div>
             </div>
         </div>
 
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js" type="text/javascript" charset="utf-8" crossorigin="anonymous"></script>
         <script>
+            var serverIp = "%SELF_IP%"
+            if (serverIp.includes("SELF_IP")) {
+                serverIp = "10.0.0.12"
+            }
+            var gateway = `ws://${serverIp}/control`;
+
             var editor = ace.edit("editor");
             editor.setTheme("ace/theme/monokai");
             editor.session.setMode("ace/mode/lua");
-        </script>
 
-        <script>
-        function shaders() {
-            return {
-                shaders: [],
-                currentShader: null,
-                inputValue: "",
-                selectShader: function(s) {
-                    if (s === this.currentShader) {
-                        return;
-                    }
-                    this.currentShader.selected = false;
-                    this.currentShader = s;
-                    this.currentShader.selected = true;
-                    fetch("http://10.0.0.12/api/show/" + s.name)
-                },
-                addShader: function() {
-                    if (!this.inputValue) {
-                        return;
-                    }
-
-                    this.shaders.push({ name: this.inputValue, selected: false });
-                    this.inputValue = "";
-                },
-                deleteShader: function(id) {
-                    fetch("http://10.0.0.12/api/shader/" + id, {method: 'DELETE'})
-                        .then(r => this.shaders = this.shaders.filter(shader => shader.name !== id))
-                },
-                listShaders: function() {
-                    fetch("http://10.0.0.12/api/shader")
-                    .then(response => response.json())
-                    .then(data => {
-                        this.shaders = data.shader.map(s => { return { name: s, selected: false } });
-                        this.currentShader = this.shaders[0];
+            function shaders() {
+                return {
+                    shaders: [],
+                    currentShader: null,
+                    inputValue: "",
+                    websocket: null,
+                    selectShader: function(s) {
+                        if (s === this.currentShader) {
+                            return;
+                        }
+                        // this.currentShader.selected = false;
+                        // this.currentShader = s;
+                        // this.currentShader.selected = true;
+                        this.websocket.send(`select ${s.name}`);
+                    },
+                    updateSelectedByName: function(name) {
+                        const shader = this.shaders.find(s => s.name === name)
+                        if (this.currentShader != null) {
+                            this.currentShader.selected = false;
+                        }
+                        this.currentShader = shader;
                         this.currentShader.selected = true;
-                    });
-                }
-            };
-        }
+                    },
+                    addShader: function() {
+                        if (!this.inputValue) {
+                            return;
+                        }
+                        const data = { name: this.inputValue, shader: editor.getValue() };
+                        console.log(JSON.stringify(data));
+
+                        fetch(`http://${serverIp}/api/shader`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data),
+                        })
+                        .then(response => response)
+                        .then(response => {
+                            this.inputValue = "";
+                        });
+                    },
+                    deleteShader: function(id) {
+                        fetch(`http://${serverIp}/api/shader/${id}`, {method: 'DELETE'});
+                    },
+                    initWebSocket: function() {
+                        console.log('Trying to open a WebSocket connection...');
+                        this.websocket = new WebSocket(gateway);
+                        this.websocket.onopen = function(event) {
+                            console.log('Connection opened');
+                        };
+                        this.websocket.onclose = function(event) {
+                            console.log('Connection closed');
+                            setTimeout(this.initWebSocket, 2000);
+                        }.bind(this);
+                        this.websocket.onmessage = this.handleMessage.bind(this);
+                    },
+                    handleMessage: function(event) {
+                        console.log(event.data);
+                        const command = event.data;
+                        if (command.startsWith("select ")) {
+                            this.updateSelectedByName(command.substring(7));
+                        }
+                        if (command.startsWith("add ")) {
+                            if (!this.shaders.find(s => s.name === command.substring(4)))
+                                this.shaders.push({ name: command.substring(4), selected: false });
+                        }
+                        if (command.startsWith("delete ")) {
+                            this.shaders = this.shaders.filter(shader => shader.name !== command.substring(7));
+                        }
+                    },
+                    initialize: function() {
+                        this.initWebSocket();
+
+                        fetch(`http://${serverIp}/api/shader`)
+                        .then(response => response.json())
+                        .then(data => {
+                            this.shaders = data.shader.map(s => { return { name: s, selected: false } });
+
+                            fetch(`http://${serverIp}/api/show`)
+                            .then(response => response.json())
+                            .then(data => {
+                                this.updateSelectedByName(data.name);
+                            });
+                        });
+                    },
+                    editShader: function(name) {
+                        fetch(`http://${serverIp}/api/shader/${name}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            this.inputValue = name;
+                            editor.setValue(data.shader);
+                        });
+                    }
+                };
+            }
         </script>
     </body>
 </html>

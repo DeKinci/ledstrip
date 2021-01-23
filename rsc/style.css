@@ -70,16 +70,27 @@ body {
     margin-left: 10px;
     margin-right: 10px;
   }
+
+  .edit-shader {
+    color: rgb(170, 170, 0);
+    font-weight: bold;
+    font-size: 1.7rem;
+    float: right;
+  }
   
   .delete-shader {
     color: red;
     font-weight: bold;
-    font-size: 1.25rem;
+    font-size: 1.5rem;
     float: right;
   }
   
   .completed .title {
     /* text-decoration: line-through; */
+  }
+
+  .hidden {
+    display: none;
   }
   
   ul li.completed::before {
@@ -154,4 +165,10 @@ body {
       scroll-behavior: auto !important;
     }
   }
+
+  #editor {
+    height: 400px;
+    width: 600px;
+    font-size: 16px;
+}
   

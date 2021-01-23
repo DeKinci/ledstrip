@@ -24,6 +24,9 @@ CallResult<void*> ShaderStorage::storeShader(const String& name, const String& c
     }
 
     file.close();
+    if (listener != nullptr) {
+        listener->animationAdded(name);
+    }
     return CallResult<void*>(nullptr);
 }
 
@@ -42,7 +45,11 @@ CallResult<String> ShaderStorage::getShader(const String& name) const {
 }
 
 bool ShaderStorage::deleteShader(const String& name) {
-    return SPIFFS.remove(shaderFolderFile(name));
+    bool result = SPIFFS.remove(shaderFolderFile(name));
+    if (listener != nullptr && result) {
+        listener->animationRemoved(name);
+    }
+    return result;
 }
 
 String ShaderStorage::shaderFolderFile(const String& name) const {
@@ -66,4 +73,8 @@ CallResult<std::vector<String>*> ShaderStorage::listShaders() const {
     }
 
     return CallResult<std::vector<String>*>(result, 200);
+}
+
+void ShaderStorage::setListener(EditAnimationListener *listener) {
+    ShaderStorage::listener = listener;
 }
