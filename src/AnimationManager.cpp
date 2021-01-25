@@ -67,8 +67,8 @@ CallResult<void*> AnimationManager::draw() {
         toReload = false;
     }
 
-    if (shaders->size() == 0) {
-        FastLED.clear();
+    if (currentAnimation == nullptr) {
+        FastLED.clear(true);
         lastUpdate = millis();
     }
     else {
@@ -97,21 +97,33 @@ CallResult<void*> AnimationManager::reload() {
         return CallResult<void*>(nullptr, shadersResult.getCode(), shadersResult.getMessage().c_str());
     }
     shaders = shadersResult.getValue();
+
     if (shaders->size() == 0) {
         currentAnimationShaderIndex = 0;
         setCurrentAnimation(nullptr);
         return CallResult<void*>(nullptr, 200);
     }
-
-    if (currentAnimationShaderIndex >= shaders->size()) {
-        currentAnimationShaderIndex = shaders->size() - 1;
+    String savedShader = shaderStorage->getLastShader();
+    bool saveLoaded = false;
+    if (savedShader != "") {
+        CallResult<void*> result = select(savedShader);
+        if (!result.hasError()) {
+            saveLoaded = true;
+        }
     }
 
-    CallResult<LuaAnimation*> loadResult = loadCached((*shaders)[currentAnimationShaderIndex]);
-    if (loadResult.hasError()) {
-        return CallResult<void*>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
+    if (!saveLoaded) {
+        if (currentAnimationShaderIndex >= shaders->size()) {
+            currentAnimationShaderIndex = shaders->size() - 1;
+        }
+
+        CallResult<LuaAnimation*> loadResult = loadCached((*shaders)[currentAnimationShaderIndex]);
+        if (loadResult.hasError()) {
+            return CallResult<void*>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
+        }
+        setCurrentAnimation(loadResult.getValue());
     }
-    setCurrentAnimation(loadResult.getValue());
+    
     Serial.println("Shaders reload finished");
     return CallResult<void*>(nullptr, 200);
 }
@@ -161,11 +173,17 @@ void AnimationManager::setListener(SelectAnimationListener* listener) {
 
 void AnimationManager::setCurrentAnimation(LuaAnimation* animation) {
     currentAnimation = animation;
+    String animationName;
+
+    if (animation != nullptr) {
+        animationName = animation->getName();
+    } else {
+        animationName = "";
+    }
+
+    shaderStorage->saveLastShader(animationName);
+
     if (listener != nullptr) {
-        if (animation != nullptr) {
-            listener->animationSelected(animation->getName());
-        } else {
-            listener->animationSelected("");
-        }
+        listener->animationSelected(animationName);
     }
 }

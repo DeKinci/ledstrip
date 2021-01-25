@@ -39,8 +39,7 @@ public:
     AnimationManager(ShaderStorage *storage, GlobalAnimationEnv* globalAnimationEnv);
 
     template <uint8_t DATA_PIN>
-    CallResult<void*> connect(int size)
-    {
+    CallResult<void*> connect(int size) {
         CallResult<void*> loadResult = reload();
         if (loadResult.hasError()) {
             return loadResult;
@@ -49,7 +48,7 @@ public:
         this->size = size;
         this->leds = new CRGB[size];
         FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, size).setCorrection(TypicalSMD5050);
-        FastLED.setBrightness(100);
+        FastLED.setBrightness(255);
         FastLED.clear(true);
         return CallResult<void*>(nullptr);
     }

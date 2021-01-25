@@ -19,10 +19,22 @@ public:
 
     void setListener(EditAnimationListener *listener);
 
+    void saveLastShader(const String& lastShader);
+    String getLastShader() const;
+
 private:
     bool begin();
     String shaderFolderFile(const String& name) const;
+
+    void saveProperty(const String& name, const String& value);
+    String getProperty(const String& name) const;
+
+    CallResult<void*> writeFile(const String& name, const String& value);
+    CallResult<String> readFile(const String& name) const;
+
     EditAnimationListener *listener;
+    const String shaderDirectory = "/sh";
+    const String propertiesDirectory = "/props";
 };
 
 #endif //SHADER_STORAGE_H
