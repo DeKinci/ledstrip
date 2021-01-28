@@ -35,14 +35,16 @@ void AnimationManager::slower() {
 
 CallResult<void*> AnimationManager::select(String& shaderName) {
     uint16_t shaderSize = shaders->size();
-    uint16_t foundShaderIndex = -1;
-    for (int i = 0; i < shaderSize; i++) {
+    uint16_t foundShaderIndex = 0;
+    bool notFound = true;
+    for (uint16_t i = 0; i < shaderSize; i++) {
         if ((*shaders)[i] == shaderName) {
             foundShaderIndex = i;
+            notFound = false;
             break;
         }
     }
-    if (foundShaderIndex == -1) {
+    if (notFound) {
         return CallResult<void*>(nullptr, 404, "No such shader");
     }
     currentAnimationShaderIndex = foundShaderIndex;
@@ -97,7 +99,6 @@ CallResult<void*> AnimationManager::reload() {
         return CallResult<void*>(nullptr, shadersResult.getCode(), shadersResult.getMessage().c_str());
     }
     shaders = shadersResult.getValue();
-
     if (shaders->size() == 0) {
         currentAnimationShaderIndex = 0;
         setCurrentAnimation(nullptr);
