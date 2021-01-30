@@ -6,17 +6,24 @@ Use platformio/VSCode for development
 
 # Setting
 
-main.cpp:
+*main.cpp*
+
 NUM_LEDS
+
 LEFT_BTN_PIN
+
 RIGHT_BTN_PIN
+
 BTN_DELAY - delay to register click, not swipe
+
 LED_PIN - led strip control pin
 
-AnimationManager.h
+*AnimationManager.h*
+
 CACHE_SIZE - how many last animations (and heavy lua states) store in memory
 
-ShaderStorage.cpp
+*ShaderStorage.cpp*
+
 SD_CS - SD card CS pin, others are default
 
 # Usage
