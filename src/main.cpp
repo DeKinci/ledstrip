@@ -5,77 +5,41 @@
 #include <ESPAsyncWiFiManager.h>
 #include <ESPmDNS.h>
 
-#include <FS.h>
-#include <SD.h>
-#include <SPI.h>
-
-#include "LuaAnimation.h"
-
-#include "Animations.h"
 #include "AnimationManager.h"
 #include "w_index_html.h"
 #include "ShaderStorage.h"
 #include "ApiController.h"
 #include "SocketController.h"
-#include "Test.h"
-
-#define SD_CS 5
 
 #define NUM_LEDS 50
-#define LFT 4
-#define RGT 2
-#define BTN_DEL 500
-
-long left = 0;
-long right = 0;
+#define LEFT_BTN_PIN -1
+#define RIGHT_BTN_PIN -1
+#define BTN_DELAY 500
 
 const uint8_t LED_PIN = 32;
 
-AsyncWebServer server(80);
 DNSServer dnsServer;
+AsyncWebServer server(80);
 
 GlobalAnimationEnv *globalAnimationEnv;
 ShaderStorage* shaderStorage;
-ApiController* apiController;
 AnimationManager* anime;
+ApiController* apiController;
 SocketController *socket;
 
-void handleButtons();
-
-void callLeft() {
-  left = millis();
-}
-
-void callRight() {
-  right = millis();
-}
-
-String processor(const String& var){
-  if(var == "SELF_IP") {
-    return String(WiFi.localIP().toString());
-  }
-  return String();
-}
-
-uint32_t mls = 0;
-uint32_t call = 0;
 CallResult<void*> status(nullptr);
 
-void writeFile(fs::FS &fs, const char * path, const char * message) {
-  Serial.printf("Writing file: %s\n", path);
-  File file = fs.open(path, FILE_WRITE);
-  if(!file) {
-    Serial.println("Failed to open file for writing");
-    return;
-  }
-  if(file.print(message)) {
-    Serial.println("File written");
-  } else {
-    Serial.println("Write failed");
-  }
-  file.close();
-}
+uint32_t loopTimestampMillis = 0;
+uint32_t loopIteration = 0;
 
+long leftClickMillis = 0;
+long rightClickMillis = 0;
+
+void handleButtons();
+void onLeftClick();
+void onRightClick();
+
+String processor(const String& var);
 
 void setup() {
   Serial.begin(115200);
@@ -83,50 +47,27 @@ void setup() {
   WiFi.mode(WIFI_OFF);
   WiFi.mode(WIFI_STA);
   AsyncWiFiManager wm(&server,&dnsServer);    
-  wm.autoConnect("Ducky LED");
+  wm.autoConnect("LED");
   Serial.println("Connected to wifi");
 
-  if(!MDNS.begin("duckyled")) {
+  if(!MDNS.begin("led")) {
      Serial.println("Error starting mDNS");
      return;
   }
-
-  // SD.begin(SD_CS);  
-  // if(!SD.begin(SD_CS)) {
-  //   Serial.println("Card Mount Failed");
-  //   return;
-  // }
-  // uint8_t cardType = SD.cardType();
-  // if(cardType == CARD_NONE) {
-  //   Serial.println("No SD card attached");
-  //   return;
-  // }
-  // Serial.println("Initializing SD card...");
-  // if (!SD.begin(SD_CS)) {
-  //   Serial.println("ERROR - SD card initialization failed!");
-  //   return;    // init failed
-  // }
-
-  // // If the data.txt file doesn't exist
-  // // Create a file on the SD card and write the data labels
-  // File file = SD.open("/data.txt");
-  // if(!file) {
-  //   Serial.println("File doens't exist");
-  //   Serial.println("Creating file...");
-  //   writeFile(SD, "/data.txt", "Reading ID, Date, Hour, Temperature \r\n");
-  // }
-  // else {
-  //   Serial.println("File already exists");  
-  // }
-  // file.close();
+  MDNS.addService("http", "tcp", 80);
 
   server.reset();
 
-  // pinMode(LFT, INPUT);
-  // attachInterrupt(digitalPinToInterrupt(LFT), callLeft, RISING);
+  if (LEFT_BTN_PIN >= 0) {
+    pinMode(LEFT_BTN_PIN, INPUT);
+    attachInterrupt(digitalPinToInterrupt(LEFT_BTN_PIN), onLeftClick, RISING);
+  }
 
-  // pinMode(RGT, INPUT);
-  // attachInterrupt(digitalPinToInterrupt(RGT), callRight, RISING);
+  if (RIGHT_BTN_PIN >= 0) {
+    pinMode(RIGHT_BTN_PIN, INPUT);
+    attachInterrupt(digitalPinToInterrupt(RIGHT_BTN_PIN), onRightClick, RISING);
+  }
+
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
   DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
@@ -203,41 +144,58 @@ void setup() {
   }
 
   server.begin();
-  Serial.println("http://duckyled.local/");
+  Serial.println("http://led.local/");
 }
 
 void loop() {
-  socket->cleanUp();
-  mls = millis();
-  call++;
+  loopTimestampMillis = millis();
+  loopIteration++;
 
-  globalAnimationEnv->timeMillis = millis();
-  globalAnimationEnv->iteration = call;
+  socket->cleanUp();
+
+  globalAnimationEnv->timeMillis = loopTimestampMillis;
+  globalAnimationEnv->iteration = loopIteration;
 
   status = anime->draw();
+  handleButtons();
 }
 
 void handleButtons() {
-  long current = millis();
-  if (left != 0 && right != 0)
+  long current = loopTimestampMillis;
+  if (leftClickMillis != 0 && rightClickMillis != 0)
   {
-    if (right > left)
+    if (rightClickMillis > leftClickMillis)
       anime->next();
-    if (right < left)
+    if (rightClickMillis < leftClickMillis)
       anime->previous();
-    right = 0;
-    left = 0;
+    rightClickMillis = 0;
+    leftClickMillis = 0;
   }
-  if (left != 0 && current - left > BTN_DEL)
+  if (leftClickMillis != 0 && current - leftClickMillis > BTN_DELAY)
   {
     anime->slower();
-    right = 0;
-    left = 0;
+    rightClickMillis = 0;
+    leftClickMillis = 0;
   }
-  if (right != 0 && current - right > BTN_DEL)
+  if (rightClickMillis != 0 && current - rightClickMillis > BTN_DELAY)
   {
     anime->faster();
-    right = 0;
-    left = 0;
+    rightClickMillis = 0;
+    leftClickMillis = 0;
   }
+}
+
+void onLeftClick() {
+  leftClickMillis = millis();
+}
+
+void onRightClick() {
+  rightClickMillis = millis();
+}
+
+String processor(const String& var){
+  if(var == "SELF_IP") {
+    return String(WiFi.localIP().toString());
+  }
+  return String();
 }
