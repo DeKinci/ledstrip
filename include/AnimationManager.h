@@ -9,7 +9,7 @@
 #include "LuaAnimation.h"
 #include "SelectAnimationListener.h"
 
-#define CACHE_SIZE 5
+#define CACHE_SIZE 3
 
 class AnimationManager
 {

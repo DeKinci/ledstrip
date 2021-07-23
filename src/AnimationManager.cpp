@@ -1,14 +1,12 @@
 #include "AnimationManager.h"
 
-AnimationManager::AnimationManager(ShaderStorage *storage, GlobalAnimationEnv* globalAnimationEnv)
-{
+AnimationManager::AnimationManager(ShaderStorage* storage, GlobalAnimationEnv* globalAnimationEnv) {
     AnimationManager::globalAnimationEnv = globalAnimationEnv;
     shaderStorage = storage;
     loadedAnimations = new std::vector<LuaAnimation*>();
 }
 
-AnimationManager::~AnimationManager()
-{
+AnimationManager::~AnimationManager() {
     for (auto anim : *loadedAnimations) {
         delete anim;
     }
@@ -72,8 +70,7 @@ CallResult<void*> AnimationManager::draw() {
     if (currentAnimation == nullptr) {
         FastLED.clear(true);
         lastUpdate = millis();
-    }
-    else {
+    } else {
         currentAnimation->apply(leds, size);
         FastLED.show();
         lastUpdate = millis();
@@ -124,7 +121,7 @@ CallResult<void*> AnimationManager::reload() {
         }
         setCurrentAnimation(loadResult.getValue());
     }
-    
+
     Serial.println("Shaders reload finished");
     return CallResult<void*>(nullptr, 200);
 }
@@ -139,7 +136,7 @@ CallResult<LuaAnimation*> AnimationManager::loadCached(String& shaderName) {
     Serial.printf("Loading shader \"%s\"\n", shaderName.c_str());
     CallResult<String> shaderResult = shaderStorage->getShader(shaderName);
     if (shaderResult.hasError()) {
-        return CallResult<LuaAnimation *>(nullptr, shaderResult.getCode(), shaderResult.getMessage().c_str());
+        return CallResult<LuaAnimation*>(nullptr, shaderResult.getCode(), shaderResult.getMessage().c_str());
     }
     String shader = shaderResult.getValue();
 
@@ -147,7 +144,7 @@ CallResult<LuaAnimation*> AnimationManager::loadCached(String& shaderName) {
     CallResult<void*> beginResult = animation->begin(shader, globalAnimationEnv);
     if (beginResult.hasError()) {
         delete animation;
-        return CallResult<LuaAnimation *>(nullptr, beginResult.getCode(), beginResult.getMessage().c_str());
+        return CallResult<LuaAnimation*>(nullptr, beginResult.getCode(), beginResult.getMessage().c_str());
     }
 
     loadedAnimations->push_back(animation);
@@ -157,7 +154,7 @@ CallResult<LuaAnimation*> AnimationManager::loadCached(String& shaderName) {
         delete toRemove;
     }
 
-    return CallResult<LuaAnimation *>(animation, 200);
+    return CallResult<LuaAnimation*>(animation, 200);
 }
 
 String AnimationManager::getCurrent() {

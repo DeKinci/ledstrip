@@ -9,32 +9,34 @@
 
 class ShaderStorage {
 public:
-    ShaderStorage();
-    virtual ~ShaderStorage();
-    CallResult<void*> storeShader(const String& name, const String& code);
-    bool hasShader(const String& name) const;
-    CallResult<String> getShader(const String& name) const;
-    bool deleteShader(const String& name);
-    CallResult<std::vector<String>*> listShaders() const;
+    
+    virtual bool hasShader(const String& name) const = 0;
+    virtual bool deleteShader(const String& name) = 0;
+    virtual CallResult<std::vector<String>*> listShaders() const = 0;
 
-    void setListener(EditAnimationListener *listener);
+    virtual CallResult<String> getShader(const String& name) const;
+    virtual CallResult<void*> storeShader(const String& name, const String& code);
+    virtual void setListener(EditAnimationListener *listener);
+    virtual void saveLastShader(const String& lastShader);
+    virtual String getLastShader() const;
 
-    void saveLastShader(const String& lastShader);
-    String getLastShader() const;
+protected:
+    virtual CallResult<void*> writeFile(const String& name, const String& value) = 0;
+    virtual CallResult<String> readFile(const String& name) const = 0;
 
-private:
-    bool begin();
-    String shaderFolderFile(const String& name) const;
+    virtual void saveProperty(const String& name, const String& value);
+    virtual String getProperty(const String& name) const;
+    virtual String shaderFolderFile(const String& name) const;
 
-    void saveProperty(const String& name, const String& value);
-    String getProperty(const String& name) const;
-
-    CallResult<void*> writeFile(const String& name, const String& value);
-    CallResult<String> readFile(const String& name) const;
-
-    EditAnimationListener *listener;
     const String shaderDirectory = "/sh";
     const String propertiesDirectory = "/props";
+
+    EditAnimationListener *listener;
+
+private:
+    
+
+    
 };
 
 #endif //SHADER_STORAGE_H
