@@ -1,43 +1,21 @@
 #include "SocketController.h"
 
-SocketController::SocketController() {
-    ws = new AsyncWebSocket("/control");
-    ws->onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
-        this->onEvent(server, client, type, arg, data, len);
-    });
+#include "Anime.h"
+
+namespace {
+AsyncWebSocket *ws = nullptr;
+
+void textAll(String text) {
+    if (ws != nullptr) {
+        ws->textAll(text);
+    }
 }
 
-SocketController::~SocketController() {
-    delete ws;
-}
-
-void SocketController::bind(AsyncWebServer &server) {
-    server.addHandler(ws);
-}
-
-void SocketController::onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
-    switch (type) {
-        case WS_EVT_CONNECT:
-        Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
-        break;
-        case WS_EVT_DISCONNECT:
-        Serial.printf("WebSocket client #%u disconnected\n", client->id());
-        break;
-        case WS_EVT_DATA:
-        handleWebSocketMessage(arg, data, len);
-        break;
-        case WS_EVT_PONG:
-        break;
-        case WS_EVT_ERROR:
-        break;
-  }
-}
-
-void SocketController::handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
-    AwsFrameInfo *info = (AwsFrameInfo*)arg;
+void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
+    AwsFrameInfo *info = (AwsFrameInfo *)arg;
     if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
         data[len] = 0;
-        String control = String((char*) data);
+        String control = String((char *)data);
         Serial.println("Control sequence: " + control);
         if (control.startsWith("select ")) {
             String shaderName = control.substring(7);
@@ -51,23 +29,41 @@ void SocketController::handleWebSocketMessage(void *arg, uint8_t *data, size_t l
     }
 }
 
-void SocketController::cleanUp() {
-    ws->cleanupClients();
+void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+    switch (type) {
+        case WS_EVT_CONNECT:
+            Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
+            break;
+        case WS_EVT_DISCONNECT:
+            Serial.printf("WebSocket client #%u disconnected\n", client->id());
+            break;
+        case WS_EVT_DATA:
+            handleWebSocketMessage(arg, data, len);
+            break;
+        case WS_EVT_PONG:
+            break;
+        case WS_EVT_ERROR:
+            break;
+    }
+}
+}  // namespace
+
+namespace SocketController {
+
+void bind(AsyncWebServer &server) {
+    ws = new AsyncWebSocket("/control");
+    ws->onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+        onEvent(server, client, type, arg, data, len);
+    });
+    server.addHandler(ws);
 }
 
-void SocketController::textAll(String text) {
-    ws->textAll(text);
-}
+void cleanUp() { ws->cleanupClients(); }
 
-void SocketController::animationSelected(String name) {
-    ws->textAll("select " + name);
-}
+void animationSelected(String name) { textAll("select " + name); }
 
-void SocketController::animationAdded(String name) {
-    ws->textAll("add " + name);
-}
+void animationAdded(String name) { textAll("add " + name); }
 
-void SocketController::animationRemoved(String name) {
-    ws->textAll("delete " + name);
-}
+void animationRemoved(String name) { textAll("delete " + name); }
 
+}  // namespace SocketController

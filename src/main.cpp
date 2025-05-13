@@ -12,9 +12,6 @@
 DNSServer dnsServer;
 AsyncWebServer server(80);
 
-ApiController *apiController;
-SocketController *socket;
-
 CallResult<void *> status(nullptr);
 
 uint32_t loopTimestampMillis = 0;
@@ -71,42 +68,36 @@ void setup() {
     });
 
     auto shaderPost = new AsyncCallbackJsonWebHandler("/api/shader", [](AsyncWebServerRequest *request, JsonVariant &json) {
-        apiController->onAddShader(request, json);
+        ApiController::onAddShader(request, json);
     });
     shaderPost->setMethod(HTTP_POST);
     server.addHandler(shaderPost);
 
     server.on("^\\/api\\/show\\/([a-zA-Z0-9_-]+)$", HTTP_GET, [](AsyncWebServerRequest *request) {
         String path = request->pathArg(0);
-        apiController->onShow(path, request);
+        ApiController::onShow(path, request);
     });
 
     server.on("^\\/api\\/shader\\/([a-zA-Z0-9_-]+)$", HTTP_GET, [](AsyncWebServerRequest *request) {
         String path = request->pathArg(0);
-        apiController->onGetShader(path, request);
+        ApiController::onGetShader(path, request);
     });
 
     server.on("^\\/api\\/shader\\/([a-zA-Z0-9_-]+)$", HTTP_DELETE, [](AsyncWebServerRequest *request) {
         String path = request->pathArg(0);
-        apiController->onDeleteShader(path, request);
+        ApiController::onDeleteShader(path, request);
     });
 
     server.on("/api/shader", HTTP_GET, [](AsyncWebServerRequest *request) {
-        apiController->onListShaders(request);
+        ApiController::onListShaders(request);
     });
 
     server.on("/api/show", HTTP_GET, [](AsyncWebServerRequest *request) {
-        apiController->onGetShow(request);
+        ApiController::onGetShow(request);
     });
 
     ShaderStorage::init();
-    socket = new SocketController();
-    socket->bind(server);
-
-    Anime::setListener(socket);
-    ShaderStorage::get().setListener(socket);
-
-    apiController = new ApiController();
+    SocketController::bind(server);
 
     status = Anime::connect();
     while (status.hasError()) {
@@ -124,7 +115,7 @@ void loop() {
     loopTimestampMillis = millis();
     loopIteration++;
 
-    socket->cleanUp();
+    SocketController::cleanUp();
     status = Anime::draw();
 }
 

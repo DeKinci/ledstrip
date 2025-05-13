@@ -7,7 +7,6 @@
 
 #include "ShaderStorage.h"
 #include "LuaAnimation.h"
-#include "SelectAnimationListener.h"
 
 #define CACHE_SIZE 3
 
@@ -19,7 +18,6 @@ namespace Anime
     void scheduleReload();
     CallResult<void *> select(String &shaderName);
     String getCurrent();
-    void setListener(SelectAnimationListener *listener);
     size_t getCurrentLeds();
     void setCurrentLeds(size_t currentLeds);
 

@@ -2,6 +2,8 @@
 
 #include <Arduino.h>
 
+#include "SocketController.h"
+
 namespace {
 
 std::array<CRGB, LED_LIMIT> leds = {};
@@ -16,7 +18,6 @@ LuaAnimation *currentAnimation = nullptr;
 long lastUpdate = 0;
 
 bool toReload = false;
-SelectAnimationListener *listener = nullptr;
 
 uint32_t animationTime = 0;
 uint32_t animationIteration = 0;
@@ -33,9 +34,7 @@ void setCurrentAnimation(LuaAnimation *animation) {
 
     ShaderStorage::get().saveLastShader(animationName);
 
-    if (listener != nullptr) {
-        listener->animationSelected(animationName);
-    }
+    SocketController::animationSelected(animationName);
 }
 
 CallResult<LuaAnimation *> loadCached(String &shaderName) {
@@ -206,8 +205,6 @@ String getCurrent() {
         return currentAnimation->getName();
     }
 }
-
-void setListener(SelectAnimationListener *alistener) { listener = alistener; }
 
 uint32_t getTime() { return animationTime; }
 uint32_t getIter() { return animationIteration; }

@@ -5,7 +5,6 @@
 #include <vector>
 
 #include "CallResult.h"
-#include "EditAnimationListener.h"
 
 class ShaderStorage {
 public:
@@ -19,7 +18,6 @@ public:
 
     virtual CallResult<String> getShader(const String& name) const;
     virtual CallResult<void*> storeShader(const String& name, const String& code);
-    virtual void setListener(EditAnimationListener *listener);
     virtual void saveLastShader(const String& lastShader);
     virtual String getLastShader() const;
     virtual void saveProperty(const String& name, const String& value);
@@ -33,8 +31,6 @@ protected:
 
     const String shaderDirectory = "sh";
     const String propertiesDirectory = "/props";
-
-    EditAnimationListener *listener;
 
 private:
     static ShaderStorage* aStorage;

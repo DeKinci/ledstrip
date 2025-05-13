@@ -1,5 +1,6 @@
 #include "ShaderStorage.h"
 #include "FlashShaderStorage.h"
+#include "SocketController.h"
 
 ShaderStorage* ShaderStorage::aStorage = nullptr;
 
@@ -12,10 +13,6 @@ ShaderStorage& ShaderStorage::get() {
     return *aStorage;
 }
 
-void ShaderStorage::setListener(EditAnimationListener *listener) {
-    ShaderStorage::listener = listener;
-}
-
 CallResult<String> ShaderStorage::getShader(const String& name) const {
     return readFile(shaderFolderFile(name));
 }
@@ -26,9 +23,7 @@ CallResult<void*> ShaderStorage::storeShader(const String& name, const String& c
     if (result.hasError()) {
         return result;
     }
-    if (listener != nullptr) {
-        listener->animationAdded(name);
-    }
+    SocketController::animationAdded(name);
     return result;
 }
 
