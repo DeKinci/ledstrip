@@ -14,7 +14,7 @@ public:
     
     virtual bool hasShader(const String& name) const = 0;
     virtual bool deleteShader(const String& name) = 0;
-    virtual CallResult<std::vector<String>*> listShaders() const = 0;
+    virtual CallResult<std::vector<String>> listShaders() const = 0;
     virtual void nuke() = 0;
 
     virtual CallResult<String> getShader(const String& name) const;

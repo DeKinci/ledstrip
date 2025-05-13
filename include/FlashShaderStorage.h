@@ -15,7 +15,7 @@ public:
 
     bool hasShader(const String& name) const;
     bool deleteShader(const String& name);
-    CallResult<std::vector<String>*> listShaders() const;
+    CallResult<std::vector<String>> listShaders() const;
     void nuke();
 
 protected:

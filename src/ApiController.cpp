@@ -2,10 +2,6 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 
-ApiController::ApiController(AnimationManager *animationManager) {
-    ApiController::animationManager = animationManager;
-}
-
 void ApiController::onAddShader(AsyncWebServerRequest *request, JsonVariant &json) {
     String name = json["name"].as<String>();
     String shader = json["shader"].as<String>();
@@ -15,7 +11,7 @@ void ApiController::onAddShader(AsyncWebServerRequest *request, JsonVariant &jso
     Serial.println("*** END SHADER ***");
     CallResult<void*> storeResult = ShaderStorage::get().storeShader(name, shader);
     if (!storeResult.hasError()) {
-        animationManager->scheduleReload();
+        Anime::scheduleReload();
         request->send(200);
     } else {
         request->send(storeResult.getCode(), "text/plain", storeResult.getMessage());
@@ -23,19 +19,18 @@ void ApiController::onAddShader(AsyncWebServerRequest *request, JsonVariant &jso
 }
 
 void ApiController::onListShaders(AsyncWebServerRequest *request) {
-    CallResult<std::vector<String>*> listResult = ShaderStorage::get().listShaders();
+    CallResult<std::vector<String>> listResult = ShaderStorage::get().listShaders();
     if (listResult.hasError()) {
         request->send(listResult.getCode(), "text/plain", listResult.getMessage());
         return;
     }
-    std::vector<String>* list = listResult.getValue();
-    uint16_t size = 100 + list->size() * 50;
+    std::vector<String> list = listResult.getValue();
+    uint16_t size = 100 + list.size() * 50;
     DynamicJsonDocument json(size);
     JsonArray names = json.createNestedArray("shader");
-    for(String str : *list) {
+    for(String str : list) {
         names.add(str);
     }
-    delete list;
     
     String response;
     serializeJson(json, response);    
@@ -60,7 +55,7 @@ void ApiController::onGetShader(String& shader, AsyncWebServerRequest *request) 
 
 void ApiController::onDeleteShader(String& shader, AsyncWebServerRequest *request) {
     if (ShaderStorage::get().deleteShader(shader)) {
-        animationManager->scheduleReload();
+        Anime::scheduleReload();
         request->send(200);
         return;
     } else {
@@ -70,7 +65,7 @@ void ApiController::onDeleteShader(String& shader, AsyncWebServerRequest *reques
 }
 
 void ApiController::onShow(String& shader, AsyncWebServerRequest *request) {
-    CallResult<void*> result = animationManager->select(shader);
+    CallResult<void*> result = Anime::select(shader);
     if (result.hasError()) {
         request->send(result.getCode(), "text/plain", result.getMessage());
         return;
@@ -79,11 +74,11 @@ void ApiController::onShow(String& shader, AsyncWebServerRequest *request) {
 }
 
 void ApiController::onGetShow(AsyncWebServerRequest *request) {
-    String result = animationManager->getCurrent();
+    String result = Anime::getCurrent();
     uint16_t size = 200 + result.length();
     DynamicJsonDocument json(size);
     json["name"] = result;
-    json["ledLimit"] = animationManager->getCurrentLeds();
+    json["ledLimit"] = Anime::getCurrentLeds();
 
     String response;
     serializeJson(json, response);

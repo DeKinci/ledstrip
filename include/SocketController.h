@@ -3,19 +3,18 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
-#include "AnimationManager.h"
+#include "Anime.h"
 #include "EditAnimationListener.h"
 
 class SocketController : public SelectAnimationListener, public EditAnimationListener {
 private:
     AsyncWebSocket *ws;
-    AnimationManager *animationManager;
 
     void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len);
     void handleWebSocketMessage(void *arg, uint8_t *data, size_t len);
 
 public:
-    SocketController(AnimationManager *animationManager);
+    SocketController();
     virtual ~SocketController();
 
     void bind(AsyncWebServer &server);

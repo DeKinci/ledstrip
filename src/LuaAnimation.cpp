@@ -1,4 +1,5 @@
 #include "LuaAnimation.h"
+#include "Anime.h"
 
 LuaAnimation::LuaAnimation(String &name)
 {
@@ -11,8 +12,6 @@ LuaAnimation::~LuaAnimation()
     lua_close(luaState);
 }
 
-static GlobalAnimationEnv *gglobalAnimationEnv = nullptr;
-
 int env_index(lua_State *L)
 {
     const char *key = lua_tostring(L, 2);
@@ -24,11 +23,11 @@ int env_index(lua_State *L)
 
     if (strcmp(key, "millis") == 0)
     {
-        lua_pushinteger(L, gglobalAnimationEnv ? gglobalAnimationEnv->timeMillis : 0);
+        lua_pushinteger(L, Anime::getTime());
     }
     else if (strcmp(key, "iteration") == 0)
     {
-        lua_pushinteger(L, gglobalAnimationEnv ? gglobalAnimationEnv->iteration : 0);
+        lua_pushinteger(L, Anime::getIter());
     }
     else
     {
@@ -71,10 +70,9 @@ int lua_set_hsv(lua_State *L)
     return 0;
 }
 
-CallResult<void *> LuaAnimation::begin(String &shader, GlobalAnimationEnv *globalAnimationEnv)
+CallResult<void *> LuaAnimation::begin(String &shader)
 {
     luaL_openlibs(luaState);
-    gglobalAnimationEnv = globalAnimationEnv;
 
     lua_newtable(luaState); // env table
 

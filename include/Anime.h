@@ -1,0 +1,33 @@
+#ifndef GARLAND_ANIMATION_MANAGER
+#define GARLAND_ANIMATION_MANAGER
+
+#include <Arduino.h>
+#include <vector>
+#include <array>
+
+#include "ShaderStorage.h"
+#include "LuaAnimation.h"
+#include "SelectAnimationListener.h"
+
+#define CACHE_SIZE 3
+
+namespace Anime
+{
+    CallResult<void *> connect();
+
+    CallResult<void *> draw();
+    void scheduleReload();
+    CallResult<void *> select(String &shaderName);
+    String getCurrent();
+    void setListener(SelectAnimationListener *listener);
+    size_t getCurrentLeds();
+    void setCurrentLeds(size_t currentLeds);
+
+    uint32_t getTime();
+    uint32_t getIter();
+
+    void sampleTime();
+    void incIter();
+};
+
+#endif // GARLAND_ANIMATION_MANAGER

@@ -4,20 +4,14 @@
 #include <ESPAsyncWiFiManager.h>
 #include <ESPmDNS.h>
 
-#include "AnimationManager.h"
+#include "Anime.h"
 #include "ApiController.h"
 #include "SocketController.h"
 #include "w_index_html.h"
 
-#define LED_BUFFER_SIZE 200
-
-const uint8_t LED_PIN = 10;
-
 DNSServer dnsServer;
 AsyncWebServer server(80);
 
-GlobalAnimationEnv *globalAnimationEnv;
-AnimationManager *anime;
 ApiController *apiController;
 SocketController *socket;
 
@@ -105,23 +99,21 @@ void setup() {
         apiController->onGetShow(request);
     });
 
-    globalAnimationEnv = new GlobalAnimationEnv();
     ShaderStorage::init();
-    anime = new AnimationManager(globalAnimationEnv, LED_BUFFER_SIZE);
-    socket = new SocketController(anime);
+    socket = new SocketController();
     socket->bind(server);
 
-    anime->setListener(socket);
+    Anime::setListener(socket);
     ShaderStorage::get().setListener(socket);
 
-    apiController = new ApiController(anime);
+    apiController = new ApiController();
 
-    status = anime->connect<LED_PIN>();
+    status = Anime::connect();
     while (status.hasError()) {
         Serial.print("Error starting Anime: ");
         Serial.println(status.getMessage());
         delay(1000);
-        status = anime->connect<LED_PIN>();
+        status = Anime::connect();
     }
 
     server.begin();
@@ -133,11 +125,7 @@ void loop() {
     loopIteration++;
 
     socket->cleanUp();
-
-    globalAnimationEnv->timeMillis = loopTimestampMillis;
-    globalAnimationEnv->iteration = loopIteration;
-
-    status = anime->draw();
+    status = Anime::draw();
 }
 
 String processor(const String &var) {

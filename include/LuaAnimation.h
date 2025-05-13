@@ -7,7 +7,6 @@
 #include <FastLED.h>
 
 #include "CallResult.h"
-#include "GlobalAnimationEnv.h"
 #include "Animation.h"
 
 class LuaAnimation
@@ -15,7 +14,7 @@ class LuaAnimation
 public:
     LuaAnimation(String& name);
     virtual ~LuaAnimation();
-    CallResult<void*> begin(String& shader, GlobalAnimationEnv* globalAnimationEnv);
+    CallResult<void*> begin(String& shader);
     CallResult<void*> apply(CRGB *leds, size_t size);
 
     String getName();

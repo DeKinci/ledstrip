@@ -1,8 +1,6 @@
 #include "SocketController.h"
 
-SocketController::SocketController(AnimationManager *animationManager) {
-    SocketController::animationManager = animationManager;
-
+SocketController::SocketController() {
     ws = new AsyncWebSocket("/control");
     ws->onEvent([this](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
         this->onEvent(server, client, type, arg, data, len);
@@ -43,11 +41,11 @@ void SocketController::handleWebSocketMessage(void *arg, uint8_t *data, size_t l
         Serial.println("Control sequence: " + control);
         if (control.startsWith("select ")) {
             String shaderName = control.substring(7);
-            animationManager->select(shaderName);
+            Anime::select(shaderName);
             textAll(control);
         } else if (control.startsWith("limitLeds ")) {
             int limitTo = control.substring(10).toInt();
-            animationManager->setCurrentLeds(limitTo);
+            Anime::setCurrentLeds(limitTo);
             textAll(control);
         }
     }
