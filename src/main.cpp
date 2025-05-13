@@ -10,9 +10,9 @@
 #include "SocketController.h"
 #include "w_index_html.h"
 
-#define NUM_LEDS 50
+#define NUM_LEDS 1
 
-const uint8_t LED_PIN = 32;
+const uint8_t LED_PIN = 10;
 
 DNSServer dnsServer;
 AsyncWebServer server(80);

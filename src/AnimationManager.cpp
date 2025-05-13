@@ -71,7 +71,12 @@ CallResult<void*> AnimationManager::draw() {
         FastLED.clear(true);
         lastUpdate = millis();
     } else {
-        currentAnimation->apply(leds, size);
+        CallResult<void*> result = currentAnimation->apply(leds, size);
+
+        if (result.hasError()) {
+            Serial.print("Apply animation error ");
+            Serial.println(result.getMessage());
+        }
         FastLED.show();
         lastUpdate = millis();
     }
@@ -97,6 +102,7 @@ CallResult<void*> AnimationManager::reload() {
     }
     shaders = shadersResult.getValue();
     if (shaders->size() == 0) {
+        Serial.println("no shaders loaded");
         currentAnimationShaderIndex = 0;
         setCurrentAnimation(nullptr);
         return CallResult<void*>(nullptr, 200);
@@ -105,8 +111,13 @@ CallResult<void*> AnimationManager::reload() {
     bool saveLoaded = false;
     if (savedShader != "") {
         CallResult<void*> result = select(savedShader);
+        Serial.print("saved loading: ");
+        Serial.print(result.hasError());
         if (!result.hasError()) {
             saveLoaded = true;
+            Serial.println();
+        } else {
+            Serial.println(result.getMessage());
         }
     }
 
