@@ -78,10 +78,6 @@ void setup() {
         request->send_P(200, "text/html", index_html, processor);
     });
 
-    server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send_P(200, "text/css", style_css);
-    });
-
     auto shaderPost = new AsyncCallbackJsonWebHandler("/api/shader", [](AsyncWebServerRequest *request, JsonVariant &json) {
         apiController->onAddShader(request, json);
     });
