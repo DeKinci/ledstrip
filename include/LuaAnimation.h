@@ -3,14 +3,12 @@
 
 #include <Arduino.h>
 #include <lua.hpp>
-#include <LuaBridge/LuaBridge.h>
 
 #include <FastLED.h>
 
 #include "CallResult.h"
 #include "GlobalAnimationEnv.h"
 #include "Animation.h"
-#include "LuaRefHolder.h"
 
 class LuaAnimation
 {
@@ -25,7 +23,6 @@ private:
     String name;
 
     lua_State* luaState;
-    LuaRefHolder* luaRefHolder;
 };
 
 #endif //GARLAND_LUA_ANIMATION

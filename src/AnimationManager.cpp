@@ -74,6 +74,9 @@ CallResult<void*> AnimationManager::draw() {
         CallResult<void*> result = currentAnimation->apply(leds, size);
 
         if (result.hasError()) {
+            size_t heap_free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
+            size_t heap_min = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+            Serial.printf("Free: %u, Min Ever Free: %u\n", heap_free, heap_min);
             Serial.print("Apply animation error ");
             Serial.println(result.getMessage());
         }

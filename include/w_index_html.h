@@ -35,9 +35,11 @@ const char index_html[] PROGMEM = R"rawliteral(
             </div>
             <br/>
             <div>
-                <div id="editor" :class="{'hidden': !inputValue}">-- example function of white color
-function color(position) 
-    return {255, 0, 255} 
+                <div id="editor" :class="{'hidden': !inputValue}">-- example function of hsv rainbow
+function draw(led_count)
+    for i = 0, led_count - 1 do
+        hsv(i, env.millis / 10 + i * 5, 255, 255)
+    end
 end
 </div>
             </div>
