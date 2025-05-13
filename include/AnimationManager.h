@@ -21,7 +21,6 @@ private:
     int speed = 100;
 
     GlobalAnimationEnv* globalAnimationEnv;
-    ShaderStorage *shaderStorage;
 
     std::vector<String>* shaders = new std::vector<String>();
     std::vector<LuaAnimation*>* loadedAnimations = new std::vector<LuaAnimation*>();
@@ -39,7 +38,7 @@ private:
     CallResult<void*> reload();
 
 public:
-    AnimationManager(ShaderStorage *storage, GlobalAnimationEnv* globalAnimationEnv, size_t ledLimit);
+    AnimationManager(GlobalAnimationEnv* globalAnimationEnv, size_t ledLimit);
 
     template <uint8_t DATA_PIN>
     CallResult<void*> connect() {

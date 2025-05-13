@@ -9,6 +9,8 @@
 
 class ShaderStorage {
 public:
+    static void init();
+    static ShaderStorage& get();
     
     virtual bool hasShader(const String& name) const = 0;
     virtual bool deleteShader(const String& name) = 0;
@@ -35,9 +37,7 @@ protected:
     EditAnimationListener *listener;
 
 private:
-    
-
-    
+    static ShaderStorage* aStorage;
 };
 
 #endif //SHADER_STORAGE_H

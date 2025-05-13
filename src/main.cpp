@@ -6,7 +6,6 @@
 
 #include "AnimationManager.h"
 #include "ApiController.h"
-#include "FlashShaderStorage.h"
 #include "SocketController.h"
 #include "w_index_html.h"
 
@@ -18,7 +17,6 @@ DNSServer dnsServer;
 AsyncWebServer server(80);
 
 GlobalAnimationEnv *globalAnimationEnv;
-ShaderStorage *shaderStorage;
 AnimationManager *anime;
 ApiController *apiController;
 SocketController *socket;
@@ -66,7 +64,7 @@ void setup() {
     server.on("/nuke", HTTP_GET, [](AsyncWebServerRequest *request) {
         Serial.println("NUKE TRIGGERED: formatting SPIFFS...");
         delay(100); // allow response to go through
-        shaderStorage->nuke();
+        ShaderStorage::get().nuke();
         request->send(200, "text/plain", "Rebooting and formatting FS...");
     });
 
@@ -108,15 +106,15 @@ void setup() {
     });
 
     globalAnimationEnv = new GlobalAnimationEnv();
-    shaderStorage = new FlashShaderStorage();
-    anime = new AnimationManager(shaderStorage, globalAnimationEnv, LED_BUFFER_SIZE);
+    ShaderStorage::init();
+    anime = new AnimationManager(globalAnimationEnv, LED_BUFFER_SIZE);
     socket = new SocketController(anime);
     socket->bind(server);
 
     anime->setListener(socket);
-    shaderStorage->setListener(socket);
+    ShaderStorage::get().setListener(socket);
 
-    apiController = new ApiController(shaderStorage, anime);
+    apiController = new ApiController(anime);
 
     status = anime->connect<LED_PIN>();
     while (status.hasError()) {

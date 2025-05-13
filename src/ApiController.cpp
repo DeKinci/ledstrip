@@ -2,8 +2,7 @@
 #include <ArduinoJson.h>
 #include <AsyncJson.h>
 
-ApiController::ApiController(ShaderStorage* shaderStorage, AnimationManager *animationManager) {
-    ApiController::shaderStorage = shaderStorage;
+ApiController::ApiController(AnimationManager *animationManager) {
     ApiController::animationManager = animationManager;
 }
 
@@ -14,7 +13,7 @@ void ApiController::onAddShader(AsyncWebServerRequest *request, JsonVariant &jso
     Serial.println("*** BEGIN SHADER ***");
     Serial.println(shader);
     Serial.println("*** END SHADER ***");
-    CallResult<void*> storeResult = shaderStorage->storeShader(name, shader);
+    CallResult<void*> storeResult = ShaderStorage::get().storeShader(name, shader);
     if (!storeResult.hasError()) {
         animationManager->scheduleReload();
         request->send(200);
@@ -24,7 +23,7 @@ void ApiController::onAddShader(AsyncWebServerRequest *request, JsonVariant &jso
 }
 
 void ApiController::onListShaders(AsyncWebServerRequest *request) {
-    CallResult<std::vector<String>*> listResult = shaderStorage->listShaders();
+    CallResult<std::vector<String>*> listResult = ShaderStorage::get().listShaders();
     if (listResult.hasError()) {
         request->send(listResult.getCode(), "text/plain", listResult.getMessage());
         return;
@@ -44,7 +43,7 @@ void ApiController::onListShaders(AsyncWebServerRequest *request) {
 }
 
 void ApiController::onGetShader(String& shader, AsyncWebServerRequest *request) {
-    CallResult<String> result = shaderStorage->getShader(shader);
+    CallResult<String> result = ShaderStorage::get().getShader(shader);
     if (result.hasError()) {
         request->send(result.getCode(), "text/plain", result.getMessage());
         return;
@@ -60,7 +59,7 @@ void ApiController::onGetShader(String& shader, AsyncWebServerRequest *request) 
 }
 
 void ApiController::onDeleteShader(String& shader, AsyncWebServerRequest *request) {
-    if (shaderStorage->deleteShader(shader)) {
+    if (ShaderStorage::get().deleteShader(shader)) {
         animationManager->scheduleReload();
         request->send(200);
         return;

@@ -1,4 +1,16 @@
 #include "ShaderStorage.h"
+#include "FlashShaderStorage.h"
+
+ShaderStorage* ShaderStorage::aStorage = nullptr;
+
+void ShaderStorage::init() {
+    static ShaderStorage* fss = new FlashShaderStorage();
+    aStorage = fss;
+}
+
+ShaderStorage& ShaderStorage::get() {
+    return *aStorage;
+}
 
 void ShaderStorage::setListener(EditAnimationListener *listener) {
     ShaderStorage::listener = listener;

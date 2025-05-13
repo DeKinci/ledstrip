@@ -9,7 +9,7 @@
 
 class ApiController {
 public:
-    ApiController(ShaderStorage* shaderStorage, AnimationManager *animationManager);
+    ApiController(AnimationManager *animationManager);
     void onAddShader(AsyncWebServerRequest *request, JsonVariant &json);
     void onListShaders(AsyncWebServerRequest *request);
     void onGetShader(String& shader, AsyncWebServerRequest *request);
@@ -18,7 +18,6 @@ public:
     void onShow(String& shader, AsyncWebServerRequest *request);
     void onGetShow(AsyncWebServerRequest *request);
 private:
-    ShaderStorage* shaderStorage;
     AnimationManager *animationManager;
 };
 

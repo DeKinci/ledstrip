@@ -1,11 +1,10 @@
 #include "AnimationManager.h"
 
-AnimationManager::AnimationManager(ShaderStorage* storage, GlobalAnimationEnv* globalAnimationEnv, size_t ledLimit) {
+AnimationManager::AnimationManager(GlobalAnimationEnv* globalAnimationEnv, size_t ledLimit) {
     this->globalAnimationEnv = globalAnimationEnv;
-    shaderStorage = storage;
     this->ledLimit = ledLimit;
     this->leds = new CRGB[ledLimit];
-    this->currentLeds = storage->getProperty("activeLeds", String(ledLimit)).toInt();
+    this->currentLeds = ShaderStorage::get().getProperty("activeLeds", String(ledLimit)).toInt();
 }
 
 AnimationManager::~AnimationManager() {
@@ -109,7 +108,7 @@ CallResult<void*> AnimationManager::reload() {
     loadedAnimations->clear();
     delete shaders;
 
-    CallResult<std::vector<String>*> shadersResult = shaderStorage->listShaders();
+    CallResult<std::vector<String>*> shadersResult = ShaderStorage::get().listShaders();
     if (shadersResult.hasError()) {
         return CallResult<void*>(nullptr, shadersResult.getCode(), shadersResult.getMessage().c_str());
     }
@@ -120,7 +119,7 @@ CallResult<void*> AnimationManager::reload() {
         setCurrentAnimation(nullptr);
         return CallResult<void*>(nullptr, 200);
     }
-    String savedShader = shaderStorage->getLastShader();
+    String savedShader = ShaderStorage::get().getLastShader();
     bool saveLoaded = false;
     if (savedShader != "") {
         CallResult<void*> result = select(savedShader);
@@ -158,7 +157,7 @@ CallResult<LuaAnimation*> AnimationManager::loadCached(String& shaderName) {
     }
 
     Serial.printf("Loading shader \"%s\"\n", shaderName.c_str());
-    CallResult<String> shaderResult = shaderStorage->getShader(shaderName);
+    CallResult<String> shaderResult = ShaderStorage::get().getShader(shaderName);
     if (shaderResult.hasError()) {
         return CallResult<LuaAnimation*>(nullptr, shaderResult.getCode(), shaderResult.getMessage().c_str());
     }
@@ -203,7 +202,7 @@ void AnimationManager::setCurrentAnimation(LuaAnimation* animation) {
         animationName = "";
     }
 
-    shaderStorage->saveLastShader(animationName);
+    ShaderStorage::get().saveLastShader(animationName);
 
     if (listener != nullptr) {
         listener->animationSelected(animationName);
