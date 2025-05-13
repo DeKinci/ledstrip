@@ -21,7 +21,7 @@ CallResult<void*> ShaderStorage::storeShader(const String& name, const String& c
 }
 
 String ShaderStorage::shaderFolderFile(const String& name) const {
-    return shaderDirectory + "/" + name;
+    return "/" + shaderDirectory + "&" + name;
 }
 
 void ShaderStorage::saveLastShader(const String& lastShader) {
@@ -34,12 +34,12 @@ String ShaderStorage::getLastShader() const{
 
 void ShaderStorage::saveProperty(const String& name, const String& value) {
     if (getProperty(name) != value) {
-        writeFile(propertiesDirectory + "/" + name, value);
+        writeFile(propertiesDirectory + "&" + name, value);
     }
 }
 
 String ShaderStorage::getProperty(const String& name) const{
-    CallResult<String> result = readFile(propertiesDirectory + "/" + name);
+    CallResult<String> result = readFile(propertiesDirectory + "&" + name);
     if (result.hasError()) {
         return "";
     }

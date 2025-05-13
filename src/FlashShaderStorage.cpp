@@ -17,6 +17,11 @@ bool FlashShaderStorage::hasShader(const String& name) const {
     return SPIFFS.exists(shaderFolderFile(name));
 }
 
+void FlashShaderStorage::nuke() {
+    SPIFFS.format();
+    ESP.restart();
+}
+
 bool FlashShaderStorage::deleteShader(const String& name) {
     bool result = SPIFFS.remove(shaderFolderFile(name));
     if (listener != nullptr && result) {
@@ -32,10 +37,12 @@ CallResult<std::vector<String>*> FlashShaderStorage::listShaders() const {
     std::vector<String>* result = new std::vector<String>();
 
     while(file) {
+        Serial.print("list file ");
+        Serial.println(file.name());
         if (!file.isDirectory()) {
             String name(file.name());
             if (name.startsWith(shaderDirectory)) {
-                result->push_back(name.substring(4));
+                result->push_back(name.substring(3));
             }
         }
         file = root.openNextFile();
@@ -56,6 +63,10 @@ CallResult<void*> FlashShaderStorage::writeFile(const String& name, const String
     }
 
     file.close();
+    Serial.print("saved file ");
+    Serial.print(name);
+    Serial.print(" ");
+    Serial.println(file.name());
     return CallResult<void*>(nullptr);
 }
 
