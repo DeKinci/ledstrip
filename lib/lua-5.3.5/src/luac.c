@@ -20,6 +20,7 @@
 
 #include "lobject.h"
 #include "lstate.h"
+#include "lundump.h"
 
 static void PrintFunction(const Proto* f, int full);
 #define luaU_print	PrintFunction
@@ -180,6 +181,7 @@ static int pmain(lua_State* L)
   FILE* D= (output==NULL) ? stdout : fopen(output,"wb");
   if (D==NULL) cannot("open");
   lua_lock(L);
+  luaU_dump(L,f,writer,D,stripping);
   lua_unlock(L);
   if (ferror(D)) cannot("write");
   if (fclose(D)) cannot("close");
@@ -215,6 +217,7 @@ int main(int argc, char* argv[])
 #define luac_c
 #define LUA_CORE
 
+#include "ldebug.h"
 #include "lobject.h"
 #include "lopcodes.h"
 
