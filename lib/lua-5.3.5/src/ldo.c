@@ -29,7 +29,6 @@
 #include "lstring.h"
 #include "ltable.h"
 #include "ltm.h"
-#include "lundump.h"
 #include "lvm.h"
 #include "lzio.h"
 
@@ -769,7 +768,7 @@ static void f_parser (lua_State *L, void *ud) {
   int c = zgetc(p->z);  /* read first character */
   if (c == LUA_SIGNATURE[0]) {
     checkmode(L, p->mode, "binary");
-    cl = luaU_undump(L, p->z, p->name);
+    luaL_error(L, "binary chunks not supported");
   }
   else {
     checkmode(L, p->mode, "text");
