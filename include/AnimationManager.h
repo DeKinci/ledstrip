@@ -10,6 +10,7 @@
 #include "SelectAnimationListener.h"
 
 #define CACHE_SIZE 3
+#define LED_MODEL WS2812
 
 class AnimationManager
 {
@@ -47,7 +48,7 @@ public:
 
         this->size = size;
         this->leds = new CRGB[size];
-        FastLED.addLeds<WS2812B, DATA_PIN, RGB>(leds, size).setCorrection(TypicalSMD5050);
+        FastLED.addLeds<LED_MODEL, DATA_PIN, RGB>(leds, size).setCorrection(TypicalSMD5050);
         FastLED.setBrightness(255);
         FastLED.clear(true);
         return CallResult<void*>(nullptr);
