@@ -1,5 +1,7 @@
 #include "DKUtils.h"
 
+#include <vector>
+
 String sformats(const char *fmt, ...) {
     va_list args;
     va_start(args, fmt);

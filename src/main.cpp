@@ -63,6 +63,13 @@ void setup() {
         request->send_P(200, "text/plain", "pong");
     });
 
+    server.on("/nuke", HTTP_GET, [](AsyncWebServerRequest *request) {
+        Serial.println("NUKE TRIGGERED: formatting SPIFFS...");
+        delay(100); // allow response to go through
+        shaderStorage->nuke();
+        request->send(200, "text/plain", "Rebooting and formatting FS...");
+    });
+
     server.on("/health", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send_P((int)status.getCode(), "text/plain", status.getMessage().c_str());
     });
@@ -117,6 +124,7 @@ void setup() {
 
     status = anime->connect<LED_PIN>(NUM_LEDS);
     while (status.hasError()) {
+        Serial.print("Error starting Anime: ");
         Serial.println(status.getMessage());
         delay(1000);
         status = anime->connect<LED_PIN>(NUM_LEDS);

@@ -13,6 +13,7 @@ public:
     virtual bool hasShader(const String& name) const = 0;
     virtual bool deleteShader(const String& name) = 0;
     virtual CallResult<std::vector<String>*> listShaders() const = 0;
+    virtual void nuke() = 0;
 
     virtual CallResult<String> getShader(const String& name) const;
     virtual CallResult<void*> storeShader(const String& name, const String& code);
@@ -28,7 +29,7 @@ protected:
     virtual String getProperty(const String& name) const;
     virtual String shaderFolderFile(const String& name) const;
 
-    const String shaderDirectory = "/sh";
+    const String shaderDirectory = "sh";
     const String propertiesDirectory = "/props";
 
     EditAnimationListener *listener;
