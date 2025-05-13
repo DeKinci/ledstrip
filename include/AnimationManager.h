@@ -15,15 +15,16 @@
 class AnimationManager
 {
 private:
-    CRGB *leds;
-    size_t size;
+    CRGB *leds = nullptr;
+    size_t ledLimit = 0;
+    size_t currentLeds = 0;
     int speed = 100;
 
     GlobalAnimationEnv* globalAnimationEnv;
     ShaderStorage *shaderStorage;
 
     std::vector<String>* shaders = new std::vector<String>();
-    std::vector<LuaAnimation*>* loadedAnimations;
+    std::vector<LuaAnimation*>* loadedAnimations = new std::vector<LuaAnimation*>();
 
     uint16_t currentAnimationShaderIndex = 0;
     LuaAnimation* currentAnimation;
@@ -36,19 +37,18 @@ private:
 
     CallResult<LuaAnimation*> loadCached(String& shaderName);
     CallResult<void*> reload();
+
 public:
-    AnimationManager(ShaderStorage *storage, GlobalAnimationEnv* globalAnimationEnv);
+    AnimationManager(ShaderStorage *storage, GlobalAnimationEnv* globalAnimationEnv, size_t ledLimit);
 
     template <uint8_t DATA_PIN>
-    CallResult<void*> connect(int size) {
+    CallResult<void*> connect() {
         CallResult<void*> loadResult = reload();
         if (loadResult.hasError()) {
             return loadResult;
         }
-
-        this->size = size;
-        this->leds = new CRGB[size];
-        FastLED.addLeds<LED_MODEL, DATA_PIN, RGB>(leds, size).setCorrection(TypicalSMD5050);
+        
+        FastLED.addLeds<LED_MODEL, DATA_PIN, RGB>(leds, ledLimit).setCorrection(TypicalSMD5050);
         FastLED.setBrightness(255);
         FastLED.clear(true);
         return CallResult<void*>(nullptr);
@@ -63,6 +63,8 @@ public:
     CallResult<void*> select(String& shaderName);
     String getCurrent();
     void setListener(SelectAnimationListener* listener);
+    size_t getCurrentLeds() const;
+    void setCurrentLeds(size_t currentLeds);
 
     virtual ~AnimationManager();
 };

@@ -38,10 +38,10 @@ void ShaderStorage::saveProperty(const String& name, const String& value) {
     }
 }
 
-String ShaderStorage::getProperty(const String& name) const{
+String ShaderStorage::getProperty(const String& name, const String& aDefault) const{
     CallResult<String> result = readFile(propertiesDirectory + "&" + name);
     if (result.hasError()) {
-        return "";
+        return aDefault;
     }
     return result.getValue();
 }

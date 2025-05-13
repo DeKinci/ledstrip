@@ -81,9 +81,10 @@ void ApiController::onShow(String& shader, AsyncWebServerRequest *request) {
 
 void ApiController::onGetShow(AsyncWebServerRequest *request) {
     String result = animationManager->getCurrent();
-    uint16_t size = 100 + result.length();
+    uint16_t size = 200 + result.length();
     DynamicJsonDocument json(size);
     json["name"] = result;
+    json["ledLimit"] = animationManager->getCurrentLeds();
 
     String response;
     serializeJson(json, response);

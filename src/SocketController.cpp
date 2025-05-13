@@ -45,6 +45,10 @@ void SocketController::handleWebSocketMessage(void *arg, uint8_t *data, size_t l
             String shaderName = control.substring(7);
             animationManager->select(shaderName);
             textAll(control);
+        } else if (control.startsWith("limitLeds ")) {
+            int limitTo = control.substring(10).toInt();
+            animationManager->setCurrentLeds(limitTo);
+            textAll(control);
         }
     }
 }

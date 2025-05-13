@@ -20,13 +20,13 @@ public:
     virtual void setListener(EditAnimationListener *listener);
     virtual void saveLastShader(const String& lastShader);
     virtual String getLastShader() const;
+    virtual void saveProperty(const String& name, const String& value);
+    virtual String getProperty(const String& name, const String& aDefault = "") const;
 
 protected:
     virtual CallResult<void*> writeFile(const String& name, const String& value) = 0;
     virtual CallResult<String> readFile(const String& name) const = 0;
 
-    virtual void saveProperty(const String& name, const String& value);
-    virtual String getProperty(const String& name) const;
     virtual String shaderFolderFile(const String& name) const;
 
     const String shaderDirectory = "sh";

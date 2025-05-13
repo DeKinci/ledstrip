@@ -13,7 +13,12 @@
 
 <body class="flex flex-col items-center mt-4 font-sans text-base">
     <div x-data="shaders()" x-init="initialize()" class="w-full max-w-xl p-4 card bg-base-100 shadow-lg">
-        <h1 class="text-xl font-bold mb-4">Select mode</h1>
+        <div class="flex flex-row items-center gap-4">
+            <p class="text-m">Led limit</p>
+            <input type="number" min="0" max="200" x-model.number="ledLimit"
+                @keyup.enter="websocket && websocket.send(`limitLeds ${ledLimit}`)" class="input input-bordered" />
+        </div>
+        <h1 class="text-xl font-bold my-4">Select mode</h1>
 
         <ul class="flex flex-col gap-2 mb-4">
             <template x-for="shader in shaders" :key="shader.name">
@@ -39,12 +44,13 @@
         </div>
 
         <div>
-            <div id="editor" :class="{'hidden': !inputValue}" class="h-[400px] w-full text-sm border rounded">-- example function of hsv rainbow
-function draw(led_count)
-    for i = 0, led_count - 1 do
-        hsv(i, env.millis / 10 + i * 5, 255, 255)
-    end
-end
+            <div id="editor" :class="{'hidden': !inputValue}" class="h-[400px] w-full text-sm border rounded">-- example
+                function of hsv rainbow
+                function draw(led_count)
+                for i = 0, led_count - 1 do
+                hsv(i, env.millis / 10 + i * 5, 255, 255)
+                end
+                end
             </div>
         </div>
     </div>
@@ -64,6 +70,7 @@ end
                 currentShader: null,
                 inputValue: "",
                 websocket: null,
+                ledLimit: null,
                 selectShader(s) {
                     if (s === this.currentShader) return;
                     this.websocket.send(`select ${s.name}`);
@@ -115,7 +122,10 @@ end
                             this.shaders = data.shader.map(name => ({ name, selected: false }));
                             fetch(`http://${serverIp}/api/show`)
                                 .then(r => r.json())
-                                .then(data => this.updateSelectedByName(data.name));
+                                .then(data => {
+                                    this.updateSelectedByName(data.name);
+                                    this.ledLimit = data.ledLimit;
+                                });
                         });
                 },
                 editShader(name) {
@@ -130,4 +140,5 @@ end
         }
     </script>
 </body>
+
 </html>

@@ -10,7 +10,7 @@
 #include "SocketController.h"
 #include "w_index_html.h"
 
-#define NUM_LEDS 1
+#define LED_BUFFER_SIZE 200
 
 const uint8_t LED_PIN = 10;
 
@@ -109,7 +109,7 @@ void setup() {
 
     globalAnimationEnv = new GlobalAnimationEnv();
     shaderStorage = new FlashShaderStorage();
-    anime = new AnimationManager(shaderStorage, globalAnimationEnv);
+    anime = new AnimationManager(shaderStorage, globalAnimationEnv, LED_BUFFER_SIZE);
     socket = new SocketController(anime);
     socket->bind(server);
 
@@ -118,12 +118,12 @@ void setup() {
 
     apiController = new ApiController(shaderStorage, anime);
 
-    status = anime->connect<LED_PIN>(NUM_LEDS);
+    status = anime->connect<LED_PIN>();
     while (status.hasError()) {
         Serial.print("Error starting Anime: ");
         Serial.println(status.getMessage());
         delay(1000);
-        status = anime->connect<LED_PIN>(NUM_LEDS);
+        status = anime->connect<LED_PIN>();
     }
 
     server.begin();

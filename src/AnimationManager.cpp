@@ -1,9 +1,11 @@
 #include "AnimationManager.h"
 
-AnimationManager::AnimationManager(ShaderStorage* storage, GlobalAnimationEnv* globalAnimationEnv) {
-    AnimationManager::globalAnimationEnv = globalAnimationEnv;
+AnimationManager::AnimationManager(ShaderStorage* storage, GlobalAnimationEnv* globalAnimationEnv, size_t ledLimit) {
+    this->globalAnimationEnv = globalAnimationEnv;
     shaderStorage = storage;
-    loadedAnimations = new std::vector<LuaAnimation*>();
+    this->ledLimit = ledLimit;
+    this->leds = new CRGB[ledLimit];
+    this->currentLeds = storage->getProperty("activeLeds", String(ledLimit)).toInt();
 }
 
 AnimationManager::~AnimationManager() {
@@ -71,12 +73,9 @@ CallResult<void*> AnimationManager::draw() {
         FastLED.clear(true);
         lastUpdate = millis();
     } else {
-        CallResult<void*> result = currentAnimation->apply(leds, size);
+        CallResult<void*> result = currentAnimation->apply(leds, currentLeds);
 
         if (result.hasError()) {
-            size_t heap_free = heap_caps_get_free_size(MALLOC_CAP_DEFAULT);
-            size_t heap_min = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
-            Serial.printf("Free: %u, Min Ever Free: %u\n", heap_free, heap_min);
             Serial.print("Apply animation error ");
             Serial.println(result.getMessage());
         }
@@ -89,6 +88,17 @@ CallResult<void*> AnimationManager::draw() {
 
 void AnimationManager::scheduleReload() {
     toReload = true;
+}
+
+size_t AnimationManager::getCurrentLeds() const {
+    return currentLeds;
+}
+
+void AnimationManager::setCurrentLeds(size_t currentLeds) {
+    this->currentLeds = currentLeds;
+    for (int i = currentLeds; i < ledLimit; i++) {
+        leds[i] = CRGB(0, 0, 0);
+    }
 }
 
 CallResult<void*> AnimationManager::reload() {
