@@ -4,6 +4,7 @@
 #include<Arduino.h>
 
 const char index_html[] PROGMEM = R"rawliteral(
+
 <!DOCTYPE html>
 <html lang="en">
 
@@ -18,6 +19,7 @@ const char index_html[] PROGMEM = R"rawliteral(
 </head>
 
 <body class="flex flex-col items-center mt-4 font-sans text-base">
+    <div class="flex flex-wrap gap-1 justify-center mb-4 rounded-full" id="ledPreview"></div>
     <div x-data="shaders()" x-init="initialize()" class="w-full max-w-xl p-4 card bg-base-100 shadow-lg">
         <div class="flex flex-row items-center gap-4">
             <p class="text-m">Led limit</p>
@@ -50,13 +52,12 @@ const char index_html[] PROGMEM = R"rawliteral(
         </div>
 
         <div>
-            <div id="editor" :class="{'hidden': !inputValue}" class="h-[400px] w-full text-sm border rounded">-- example
-                function of hsv rainbow
-                function draw(led_count)
-                for i = 0, led_count - 1 do
-                hsv(i, env.millis / 10 + i * 5, 255, 255)
-                end
-                end
+            <div id="editor" :class="{'hidden': !inputValue}" class="h-[400px] w-full text-sm border rounded">-- example function of hsv rainbow
+function draw(led_count)
+    for i = 0, led_count - 1 do
+        hsv(i, env.millis / 10 + i * 5, 255, 255)
+    end
+end
             </div>
         </div>
     </div>
@@ -108,7 +109,7 @@ const char index_html[] PROGMEM = R"rawliteral(
                     };
                     this.websocket.onmessage = this.handleMessage.bind(this);
                 },
-                handleMessage(event) {
+                handleTextMessage(event) {
                     const cmd = event.data;
                     if (cmd.startsWith("select ")) this.updateSelectedByName(cmd.substring(7));
                     if (cmd.startsWith("add ")) {
@@ -118,6 +119,34 @@ const char index_html[] PROGMEM = R"rawliteral(
                     if (cmd.startsWith("delete ")) {
                         const name = cmd.substring(7);
                         this.shaders = this.shaders.filter(s => s.name !== name);
+                    }
+                },
+                async handleMessage(e) {
+                    const buffer = await e.data.arrayBuffer();
+                    const data = new Uint8Array(buffer);
+                    const type = data[0];
+                    if (type === 0x00) {
+                        const text = new TextDecoder().decode(data.slice(1));
+                        this.handleTextMessage({ data: text });
+                    } else if (type === 0x01) {
+                        const ledCount = data[1];
+                        const container = document.getElementById("ledPreview");
+                        container.innerHTML = "";
+                        let size = 20;
+                        const maxWidth = container.offsetWidth || window.innerWidth;
+                        const estTotalWidth = ledCount * (size + 4);
+                        if (estTotalWidth > maxWidth) size = 10;
+                        for (let i = 0; i < ledCount; i++) {
+                            const r = data[2 + i * 3];
+                            const g = data[3 + i * 3];
+                            const b = data[4 + i * 3];
+                            const el = document.createElement("div");
+                            el.style.width = `${size}px`;
+                            el.style.height = `${size}px`;
+                            el.className = "rounded-full";
+                            el.style.backgroundColor = `rgb(${r},${g},${b})`;
+                            container.appendChild(el);
+                        }
                     }
                 },
                 initialize() {
@@ -146,6 +175,7 @@ const char index_html[] PROGMEM = R"rawliteral(
         }
     </script>
 </body>
+
 </html>
 
 )rawliteral";

@@ -21,6 +21,18 @@ bool toReload = false;
 
 uint32_t animationTime = 0;
 uint32_t animationIteration = 0;
+float deltaTime = 0;
+
+uint32_t lastSocketSendMillist = 0;
+
+void sendLedsToSocket() {
+    if (millis() - lastSocketSendMillist < 50) {
+        return;
+    }
+
+    SocketController::updateLedVals(leds.data(), currentLeds);
+    lastSocketSendMillist = millis();
+}
 
 void setCurrentAnimation(LuaAnimation *animation) {
     currentAnimation = animation;
@@ -122,7 +134,8 @@ CallResult<void *> reload() {
 namespace Anime {
 
 CallResult<void *> connect() {
-    currentLeds = ShaderStorage::get().getProperty("activeLeds", String(LED_LIMIT)).toInt();
+    int cl = ShaderStorage::get().getProperty("activeLeds", String(LED_LIMIT)).toInt();
+    currentLeds = std::min(200, std::max(0, cl));
 
     CallResult<void *> loadResult = reload();
     if (loadResult.hasError()) {
@@ -159,6 +172,7 @@ CallResult<void *> select(String &shaderName) {
 }
 
 CallResult<void *> draw() {
+    deltaTime = (millis() - animationTime) / 1000.0;
     Anime::sampleTime();
     Anime::incIter();
 
@@ -172,7 +186,6 @@ CallResult<void *> draw() {
 
     if (currentAnimation == nullptr) {
         FastLED.clear(true);
-        lastUpdate = millis();
     } else {
         CallResult<void *> result = currentAnimation->apply(leds.data(), currentLeds);
 
@@ -180,8 +193,9 @@ CallResult<void *> draw() {
             return result;
         }
         FastLED.show();
-        lastUpdate = millis();
     }
+    sendLedsToSocket();
+    lastUpdate = millis();
 
     return CallResult<void *>(nullptr, 200);
 }
@@ -208,6 +222,7 @@ String getCurrent() {
 
 uint32_t getTime() { return animationTime; }
 uint32_t getIter() { return animationIteration; }
+float getDeltaTime() { return deltaTime; }
 
 void sampleTime() { animationTime = millis(); }
 void incIter() { animationIteration++; }

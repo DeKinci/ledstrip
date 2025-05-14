@@ -6,9 +6,14 @@ namespace {
 AsyncWebSocket *ws = nullptr;
 
 void textAll(String text) {
-    if (ws != nullptr) {
-        ws->textAll(text);
+    if (!ws || !ws->count()) {
+        return;
     }
+
+    std::vector<uint8_t> msg;
+    msg.push_back(0x00);
+    msg.insert(msg.end(), text.begin(), text.end());
+    ws->binaryAll(msg.data(), msg.size());
 }
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
@@ -65,5 +70,22 @@ void animationSelected(String name) { textAll("select " + name); }
 void animationAdded(String name) { textAll("add " + name); }
 
 void animationRemoved(String name) { textAll("delete " + name); }
+
+void updateLedVals(CRGB *leds, size_t actualLength) {
+    if (!ws->count()) {
+        return;
+    }
+
+    std::vector<uint8_t> msg;
+    msg.push_back(0x01);
+    msg.push_back(actualLength);
+    for (int i = 0; i < actualLength; ++i) {
+        msg.push_back(leds[i].r);
+        msg.push_back(leds[i].g);
+        msg.push_back(leds[i].b);
+    }
+
+    ws->binaryAll(msg.data(), msg.size());
+}
 
 }  // namespace SocketController

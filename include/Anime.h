@@ -23,6 +23,7 @@ namespace Anime
 
     uint32_t getTime();
     uint32_t getIter();
+    float getDeltaTime();
 
     void sampleTime();
     void incIter();

@@ -1,36 +1,28 @@
 #include "LuaAnimation.h"
+
 #include "Anime.h"
 
-LuaAnimation::LuaAnimation(String &name)
-{
+LuaAnimation::LuaAnimation(String &name) {
     LuaAnimation::name = name;
     luaState = luaL_newstate();
 }
 
-LuaAnimation::~LuaAnimation()
-{
-    lua_close(luaState);
-}
+LuaAnimation::~LuaAnimation() { lua_close(luaState); }
 
-int env_index(lua_State *L)
-{
+int env_index(lua_State *L) {
     const char *key = lua_tostring(L, 2);
-    if (!key)
-    {
+    if (!key) {
         lua_pushnil(L);
         return 1;
     }
 
-    if (strcmp(key, "millis") == 0)
-    {
+    if (strcmp(key, "millis") == 0) {
         lua_pushinteger(L, Anime::getTime());
-    }
-    else if (strcmp(key, "iteration") == 0)
-    {
+    } else if (strcmp(key, "iteration") == 0) {
         lua_pushinteger(L, Anime::getIter());
-    }
-    else
-    {
+    } else if (strcmp(key, "deltatime") == 0) {
+        lua_pushnumber(L, Anime::getDeltaTime());
+    } else {
         lua_pushnil(L);
     }
     return 1;
@@ -38,46 +30,40 @@ int env_index(lua_State *L)
 
 static CRGB *leds_buffer = nullptr;
 
-static inline uint8_t clamp_byte(lua_Number v)
-{
+static inline uint8_t clamp_byte(lua_Number v) {
     int i = static_cast<int>(v);
     return static_cast<uint8_t>((i % 256 + 256) % 256);
 }
 
-int lua_set_rgb(lua_State *L)
-{
+int lua_set_rgb(lua_State *L) {
     int index = static_cast<int>(lua_tointeger(L, 1));
     uint8_t r = clamp_byte(lua_tonumber(L, 2));
     uint8_t g = clamp_byte(lua_tonumber(L, 3));
     uint8_t b = clamp_byte(lua_tonumber(L, 4));
-    if (leds_buffer && index >= 0)
-    {
+    if (leds_buffer && index >= 0) {
         leds_buffer[index] = CRGB(r, g, b);
     }
     return 0;
 }
 
-int lua_set_hsv(lua_State *L)
-{
+int lua_set_hsv(lua_State *L) {
     int index = static_cast<int>(lua_tointeger(L, 1));
     uint8_t h = clamp_byte(lua_tonumber(L, 2));
     uint8_t s = clamp_byte(lua_tonumber(L, 3));
     uint8_t v = clamp_byte(lua_tonumber(L, 4));
-    if (leds_buffer && index >= 0)
-    {
+    if (leds_buffer && index >= 0) {
         leds_buffer[index] = CHSV(h, s, v);
     }
     return 0;
 }
 
-CallResult<void *> LuaAnimation::begin(String &shader)
-{
+CallResult<void *> LuaAnimation::begin(String &shader) {
     luaL_openlibs(luaState);
 
-    lua_newtable(luaState); // env table
+    lua_newtable(luaState);  // env table
 
-    lua_newtable(luaState);                 // metatable
-    lua_pushcfunction(luaState, env_index); // live access setup
+    lua_newtable(luaState);                  // metatable
+    lua_pushcfunction(luaState, env_index);  // live access setup
     lua_setfield(luaState, -2, "__index");
     lua_setmetatable(luaState, -2);
 
@@ -91,8 +77,7 @@ CallResult<void *> LuaAnimation::begin(String &shader)
     lua_setglobal(luaState, "hsv");
 
     int loadShaderCode = luaL_dostring(luaState, shader.c_str());
-    if (loadShaderCode)
-    {
+    if (loadShaderCode) {
         const char *err = lua_tostring(luaState, -1);
         lua_settop(luaState, 0);
         return CallResult<void *>(nullptr, 400, "Error loading code: %s", err);
@@ -101,21 +86,18 @@ CallResult<void *> LuaAnimation::begin(String &shader)
     return CallResult<void *>(nullptr, 200);
 }
 
-CallResult<void *> LuaAnimation::apply(CRGB *leds, size_t size)
-{
+CallResult<void *> LuaAnimation::apply(CRGB *leds, size_t size) {
     leds_buffer = leds;
 
     lua_getglobal(luaState, "draw");
-    if (!lua_isfunction(luaState, -1))
-    {
+    if (!lua_isfunction(luaState, -1)) {
         lua_pop(luaState, 1);
         return CallResult<void *>(nullptr, 400, "Shader error: no draw() function defined");
     }
 
-    lua_pushinteger(luaState, size); // pass led_count as argument
+    lua_pushinteger(luaState, size);  // pass led_count as argument
 
-    if (lua_pcall(luaState, 1, 0, 0) != 0)
-    {
+    if (lua_pcall(luaState, 1, 0, 0) != 0) {
         const char *error = lua_tostring(luaState, -1);
         lua_settop(luaState, 0);
         lua_gc(luaState, LUA_GCCOLLECT, 0);
@@ -127,7 +109,4 @@ CallResult<void *> LuaAnimation::apply(CRGB *leds, size_t size)
     return CallResult<void *>(nullptr, 200);
 }
 
-String LuaAnimation::getName()
-{
-    return name;
-}
+String LuaAnimation::getName() { return name; }
