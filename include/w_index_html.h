@@ -20,6 +20,12 @@ const char index_html[] PROGMEM = R"rawliteral(
 
 <body class="flex flex-col items-center mt-4 font-sans text-base">
     <div class="flex flex-wrap gap-1 justify-center mb-4 rounded-full" id="ledPreview"></div>
+    <div class="fixed top-4 right-4 p-2 max-h-[90vh] overflow-y-auto text-xs w-28">
+        <div class="font-bold mb-2 text-center">HSV Hue</div>
+        <template id="hsvHueTemplate">
+            <!-- JS will populate this -->
+        </template>
+    </div>
     <div x-data="shaders()" x-init="initialize()" class="w-full max-w-xl p-4 card bg-base-100 shadow-lg">
         <div class="flex flex-row items-center gap-4">
             <p class="text-m">Led limit</p>
@@ -150,6 +156,20 @@ end
                     }
                 },
                 initialize() {
+                    function createHueCheatsheet() {
+                        const container = document.querySelector("template#hsvHueTemplate").parentElement;
+                        for (let h = 0; h <= 255; h += 20) {
+                            const div = document.createElement("div");
+                            div.className = "flex items-center gap-1 mb-1";
+                            div.innerHTML = `
+                                <div style="background-color: hsl(${(h / 256) * 360} 100 50)" class="w-3 h-3 rounded-sm"></div>
+                                <span>${h}</span>
+                            `;
+                            container.appendChild(div);
+                        }
+                    }
+                    createHueCheatsheet();
+
                     this.initWebSocket();
                     fetch(`http://${serverIp}/api/shader`)
                         .then(r => r.json())

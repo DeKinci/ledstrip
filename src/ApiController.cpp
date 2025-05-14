@@ -28,16 +28,16 @@ void onListShaders(AsyncWebServerRequest *request) {
         return;
     }
     std::vector<String> list = listResult.getValue();
-    uint16_t size = 100 + list.size() * 50;
-    DynamicJsonDocument json(size);
-    JsonArray names = json.createNestedArray("shader");
+
+    JsonDocument json;
+    JsonArray names = json["shader"].to<JsonArray>();
     for (String str : list) {
         names.add(str);
     }
 
-    String response;
-    serializeJson(json, response);
-    request->send(200, "application/json", response);
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(json, *response);
+    request->send(response);
 }
 
 void onGetShader(String &shader, AsyncWebServerRequest *request) {
@@ -47,13 +47,12 @@ void onGetShader(String &shader, AsyncWebServerRequest *request) {
         return;
     }
 
-    uint16_t size = 200 + result.getValue().length();
-    DynamicJsonDocument json(size);
+    JsonDocument json;
     json["shader"] = result.getValue();
 
-    String response;
-    serializeJson(json, response);
-    request->send(200, "application/json", response);
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(json, *response);
+    request->send(response);
 }
 
 void onDeleteShader(String &shader, AsyncWebServerRequest *request) {
@@ -77,15 +76,13 @@ void onShow(String &shader, AsyncWebServerRequest *request) {
 }
 
 void onGetShow(AsyncWebServerRequest *request) {
-    String result = Anime::getCurrent();
-    uint16_t size = 200 + result.length();
-    DynamicJsonDocument json(size);
-    json["name"] = result;
+    JsonDocument json;
+    json["name"] = Anime::getCurrent();
     json["ledLimit"] = Anime::getCurrentLeds();
 
-    String response;
-    serializeJson(json, response);
-    request->send(200, "application/json", response);
+    AsyncResponseStream *response = request->beginResponseStream("application/json");
+    serializeJson(json, *response);
+    request->send(response);
 }
 
 }  // namespace ApiController
