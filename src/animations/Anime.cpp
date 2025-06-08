@@ -236,11 +236,19 @@ String getCurrent() {
 }
 
 void nextAnimation() {
-
+    if (shaders.empty()) return;
+    currentAnimationShaderIndex = (currentAnimationShaderIndex + 1) % shaders.size();
+    setAnimationByIndex(currentAnimationShaderIndex);
 }
 
 void previousAnimation() {
-
+    if (shaders.empty()) return;
+    if (currentAnimationShaderIndex == 0) {
+        currentAnimationShaderIndex = shaders.size() - 1;
+    } else {
+        currentAnimationShaderIndex--;
+    }
+    setAnimationByIndex(currentAnimationShaderIndex);
 }
 
 uint32_t getTime() { return animationTime; }
