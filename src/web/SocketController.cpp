@@ -1,6 +1,6 @@
 #include "SocketController.h"
 
-#include "Anime.h"
+#include "animations/Anime.h"
 
 namespace {
 AsyncWebSocket *ws = nullptr;

@@ -5,10 +5,10 @@
 #include <ESPmDNS.h>
 #include <NimBLEDevice.h>
 
-#include "Anime.h"
-#include "ApiController.h"
-#include "SocketController.h"
-#include "w_index_html.h"
+#include "animations/Anime.h"
+#include "web/ApiController.h"
+#include "web/SocketController.h"
+#include "web/w_index_html.h"
 
 DNSServer dnsServer;
 AsyncWebServer server(80);

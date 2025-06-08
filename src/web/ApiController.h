@@ -4,8 +4,8 @@
 #include <AsyncJson.h>
 #include <ESPAsyncWebServer.h>
 
-#include "Anime.h"
-#include "ShaderStorage.h"
+#include "animations/Anime.h"
+#include "core/ShaderStorage.h"
 
 namespace ApiController {
 void onAddShader(AsyncWebServerRequest *request, JsonVariant &json);

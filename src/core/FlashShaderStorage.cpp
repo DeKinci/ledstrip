@@ -1,5 +1,5 @@
 #include "FlashShaderStorage.h"
-#include "SocketController.h"
+#include "web/SocketController.h"
 
 #include <SPIFFS.h>
 #include <FS.h>
