@@ -26,7 +26,7 @@ float deltaTime = 0;
 uint32_t lastSocketSendMillist = 0;
 
 void sendLedsToSocket() {
-    if (millis() - lastSocketSendMillist < 50) {
+    if (millis() - lastSocketSendMillist < 100) {
         return;
     }
 
@@ -80,6 +80,16 @@ CallResult<LuaAnimation *> loadCached(String &shaderName) {
     return CallResult<LuaAnimation *>(animation, 200);
 }
 
+CallResult<void *> setAnimationByIndex(uint16_t shaderIndex) {
+    currentAnimationShaderIndex = shaderIndex;
+    CallResult<LuaAnimation *> loadResult = loadCached(shaders[currentAnimationShaderIndex]);
+    if (loadResult.hasError()) {
+        return CallResult<void *>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
+    }
+    setCurrentAnimation(loadResult.getValue());
+    return CallResult<void *>(nullptr, 200); 
+}
+
 CallResult<void *> reload() {
     Serial.println("Performing cache cleanup");
     for (auto anim : loadedAnimations) {
@@ -118,11 +128,16 @@ CallResult<void *> reload() {
             currentAnimationShaderIndex = shaders.size() - 1;
         }
 
-        CallResult<LuaAnimation *> loadResult = loadCached(shaders[currentAnimationShaderIndex]);
-        if (loadResult.hasError()) {
-            return CallResult<void *>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
+        auto result = setAnimationByIndex(currentAnimationShaderIndex);
+        if (result.hasError()) {
+            return result;
         }
-        setCurrentAnimation(loadResult.getValue());
+
+        // CallResult<LuaAnimation *> loadResult = loadCached(shaders[currentAnimationShaderIndex]);
+        // if (loadResult.hasError()) {
+        //     return CallResult<void *>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
+        // }
+        // setCurrentAnimation(loadResult.getValue());
     }
 
     Serial.println("Shaders reload finished");
@@ -142,7 +157,7 @@ CallResult<void *> connect() {
         return loadResult;
     }
 
-    FastLED.addLeds<LED_MODEL, LED_PIN, RGB>(leds.data(), LED_LIMIT).setCorrection(TypicalSMD5050);
+    FastLED.addLeds<LED_MODEL, LED_PIN, RGB_ORDER>(leds.data(), LED_LIMIT).setCorrection(TypicalSMD5050);
     FastLED.setBrightness(255);
     FastLED.clear(true);
     return CallResult<void *>(nullptr);
@@ -218,6 +233,14 @@ String getCurrent() {
     } else {
         return currentAnimation->getName();
     }
+}
+
+void nextAnimation() {
+
+}
+
+void previousAnimation() {
+
 }
 
 uint32_t getTime() { return animationTime; }

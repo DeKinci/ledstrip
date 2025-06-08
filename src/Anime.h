@@ -21,6 +21,9 @@ namespace Anime
     size_t getCurrentLeds();
     void setCurrentLeds(size_t currentLeds);
 
+    void nextAnimation();
+    void previousAnimation();
+
     uint32_t getTime();
     uint32_t getIter();
     float getDeltaTime();

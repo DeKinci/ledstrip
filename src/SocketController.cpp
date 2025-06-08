@@ -13,7 +13,11 @@ void textAll(String text) {
     std::vector<uint8_t> msg;
     msg.push_back(0x00);
     msg.insert(msg.end(), text.begin(), text.end());
-    ws->binaryAll(msg.data(), msg.size());
+    if (ws->availableForWriteAll()) {
+        ws->binaryAll(msg.data(), msg.size());
+    } else {
+        Serial.println("Client message queues are full");
+    }
 }
 
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
@@ -41,6 +45,7 @@ void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType 
             break;
         case WS_EVT_DISCONNECT:
             Serial.printf("WebSocket client #%u disconnected\n", client->id());
+            ws->cleanupClients();
             break;
         case WS_EVT_DATA:
             handleWebSocketMessage(arg, data, len);
@@ -85,7 +90,7 @@ void updateLedVals(CRGB *leds, size_t actualLength) {
         msg.push_back(leds[i].b);
     }
 
-    ws->binaryAll(msg.data(), msg.size());
+    // ws->binaryAll(msg.data(), msg.size());
 }
 
 }  // namespace SocketController
