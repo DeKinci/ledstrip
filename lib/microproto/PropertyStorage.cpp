@@ -1,0 +1,148 @@
+#include "PropertyStorage.h"
+#include <Arduino.h>
+#include <nvs_flash.h>
+#include <nvs.h>
+
+namespace MicroProto {
+
+bool PropertyStorage::initialized = false;
+
+void PropertyStorage::init() {
+    if (initialized) return;
+
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated, erase and retry
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    initialized = true;
+    Serial.println("[PropertyStorage] NVS initialized");
+}
+
+void PropertyStorage::makeKey(uint8_t property_id, char* buffer, size_t buffer_size) {
+    snprintf(buffer, buffer_size, "p%d", property_id);
+}
+
+bool PropertyStorage::save(PropertyBase* property) {
+    if (!property) return false;
+    if (!initialized) init();
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        Serial.printf("[PropertyStorage] Failed to open NVS: %s\n", esp_err_to_name(err));
+        return false;
+    }
+
+    char key[16];
+    makeKey(property->id, key, sizeof(key));
+
+    const void* data = property->getData();
+    size_t size = property->getSize();
+
+    err = nvs_set_blob(handle, key, data, size);
+    if (err != ESP_OK) {
+        Serial.printf("[PropertyStorage] Failed to save property %d: %s\n",
+                     property->id, esp_err_to_name(err));
+        nvs_close(handle);
+        return false;
+    }
+
+    err = nvs_commit(handle);
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        Serial.printf("[PropertyStorage] Saved property %d (%s)\n", property->id, property->name);
+        return true;
+    } else {
+        Serial.printf("[PropertyStorage] Failed to commit property %d: %s\n",
+                     property->id, esp_err_to_name(err));
+        return false;
+    }
+}
+
+bool PropertyStorage::load(PropertyBase* property) {
+    if (!property) return false;
+    if (!initialized) init();
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        // Namespace doesn't exist yet, not an error
+        return false;
+    }
+
+    char key[16];
+    makeKey(property->id, key, sizeof(key));
+
+    // Get size first
+    size_t size = 0;
+    err = nvs_get_blob(handle, key, nullptr, &size);
+    if (err != ESP_OK || size == 0) {
+        nvs_close(handle);
+        return false;
+    }
+
+    // Check size matches
+    if (size != property->getSize()) {
+        Serial.printf("[PropertyStorage] Size mismatch for property %d: expected %d, got %d\n",
+                     property->id, property->getSize(), size);
+        nvs_close(handle);
+        return false;
+    }
+
+    // Allocate buffer and read
+    uint8_t* buffer = new uint8_t[size];
+    err = nvs_get_blob(handle, key, buffer, &size);
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        property->setData(buffer, size);
+        Serial.printf("[PropertyStorage] Loaded property %d (%s)\n", property->id, property->name);
+        delete[] buffer;
+        return true;
+    } else {
+        Serial.printf("[PropertyStorage] Failed to load property %d: %s\n",
+                     property->id, esp_err_to_name(err));
+        delete[] buffer;
+        return false;
+    }
+}
+
+bool PropertyStorage::erase(PropertyBase* property) {
+    if (!property) return false;
+    if (!initialized) init();
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) return false;
+
+    char key[16];
+    makeKey(property->id, key, sizeof(key));
+
+    err = nvs_erase_key(handle, key);
+    nvs_commit(handle);
+    nvs_close(handle);
+
+    return (err == ESP_OK);
+}
+
+bool PropertyStorage::eraseAll() {
+    if (!initialized) init();
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) return false;
+
+    err = nvs_erase_all(handle);
+    nvs_commit(handle);
+    nvs_close(handle);
+
+    Serial.println("[PropertyStorage] Erased all properties");
+    return (err == ESP_OK);
+}
+
+} // namespace MicroProto

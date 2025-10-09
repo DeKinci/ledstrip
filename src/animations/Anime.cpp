@@ -9,6 +9,7 @@ namespace {
 std::array<CRGB, LED_LIMIT> leds = {};
 
 size_t currentLeds = 0;
+uint8_t currentBrightness = 255;
 
 std::vector<String> shaders = {};
 std::vector<LuaAnimation *> loadedAnimations = {};
@@ -56,15 +57,22 @@ CallResult<LuaAnimation *> loadCached(String &shaderName) {
         }
     }
 
-    Serial.printf("Loading shader \"%s\"\n", shaderName.c_str());
+    Serial.printf("Loading shader \"%s\", Free: %d bytes\n", shaderName.c_str(), ESP.getFreeHeap());
     CallResult<String> shaderResult = ShaderStorage::get().getShader(shaderName);
     if (shaderResult.hasError()) {
         return CallResult<LuaAnimation *>(nullptr, shaderResult.getCode(), shaderResult.getMessage().c_str());
     }
+    Serial.printf("  After getShader, Free: %d bytes\n", ESP.getFreeHeap());
+
     String shader = shaderResult.getValue();
+    Serial.printf("  After String copy (len=%d), Free: %d bytes\n", shader.length(), ESP.getFreeHeap());
 
     LuaAnimation *animation = new LuaAnimation(shaderName);
+    Serial.printf("  After new LuaAnimation, Free: %d bytes\n", ESP.getFreeHeap());
+
     CallResult<void *> beginResult = animation->begin(shader);
+    Serial.printf("  After animation->begin, Free: %d bytes\n", ESP.getFreeHeap());
+
     if (beginResult.hasError()) {
         delete animation;
         return CallResult<LuaAnimation *>(nullptr, beginResult.getCode(), beginResult.getMessage().c_str());
@@ -74,19 +82,25 @@ CallResult<LuaAnimation *> loadCached(String &shaderName) {
     if (loadedAnimations.size() > CACHE_SIZE) {
         LuaAnimation *toRemove = loadedAnimations[0];
         loadedAnimations.erase(loadedAnimations.begin());
+        Serial.printf("  Deleting old animation, Free before: %d bytes\n", ESP.getFreeHeap());
         delete toRemove;
+        Serial.printf("  After delete, Free: %d bytes\n", ESP.getFreeHeap());
     }
 
+    Serial.printf("  Before return (shader String destroyed), Free: %d bytes\n", ESP.getFreeHeap());
     return CallResult<LuaAnimation *>(animation, 200);
 }
 
 CallResult<void *> setAnimationByIndex(uint16_t shaderIndex) {
+    Serial.printf("setAnimationByIndex start, Free: %d bytes\n", ESP.getFreeHeap());
     currentAnimationShaderIndex = shaderIndex;
     CallResult<LuaAnimation *> loadResult = loadCached(shaders[currentAnimationShaderIndex]);
+    Serial.printf("After loadCached return, Free: %d bytes\n", ESP.getFreeHeap());
     if (loadResult.hasError()) {
         return CallResult<void *>(nullptr, loadResult.getCode(), loadResult.getMessage().c_str());
     }
     setCurrentAnimation(loadResult.getValue());
+    Serial.printf("After setCurrentAnimation, Free: %d bytes\n", ESP.getFreeHeap());
     return CallResult<void *>(nullptr, 200); 
 }
 
@@ -151,6 +165,9 @@ namespace Anime {
 CallResult<void *> connect() {
     int cl = ShaderStorage::get().getProperty("activeLeds", String(LED_LIMIT)).toInt();
     currentLeds = std::min(200, std::max(0, cl));
+
+    int br = ShaderStorage::get().getProperty("brightness", String(255)).toInt();
+    currentBrightness = std::min(255, std::max(0, br));
 
     CallResult<void *> loadResult = reload();
     if (loadResult.hasError()) {
@@ -225,6 +242,13 @@ void setCurrentLeds(size_t acurrentLeds) {
         leds[i] = CRGB(0, 0, 0);
     }
     ShaderStorage::get().saveProperty("activeLeds", String(currentLeds));
+}
+
+uint8_t getBrightness() { return currentBrightness; }
+
+void setBrightness(uint8_t brightness) {
+    currentBrightness = brightness;
+    ShaderStorage::get().saveProperty("brightness", String(currentBrightness));
 }
 
 String getCurrent() {

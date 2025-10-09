@@ -1,0 +1,13 @@
+{
+  "name": "MicroProto",
+  "version": "0.1.0",
+  "description": "Property-based binary protocol for distributed ESP32 mesh",
+  "keywords": ["esp32", "property", "protocol", "mesh"],
+  "authors": [
+    {
+      "name": "SmartGarland"
+    }
+  ],
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

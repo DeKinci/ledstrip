@@ -22,6 +22,8 @@ int env_index(lua_State *L) {
         lua_pushinteger(L, Anime::getIter());
     } else if (strcmp(key, "deltatime") == 0) {
         lua_pushnumber(L, Anime::getDeltaTime());
+    } else if (strcmp(key, "brightness") == 0) {
+        lua_pushinteger(L, Anime::getBrightness());
     } else {
         lua_pushnil(L);
     }

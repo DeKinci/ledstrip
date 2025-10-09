@@ -8,7 +8,7 @@
 #include "core/ShaderStorage.h"
 #include "LuaAnimation.h"
 
-#define CACHE_SIZE 3
+#define CACHE_SIZE 1
 
 namespace Anime
 {
@@ -20,6 +20,9 @@ namespace Anime
     String getCurrent();
     size_t getCurrentLeds();
     void setCurrentLeds(size_t currentLeds);
+
+    uint8_t getBrightness();
+    void setBrightness(uint8_t brightness);
 
     void nextAnimation();
     void previousAnimation();
