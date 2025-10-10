@@ -1,15 +1,20 @@
 #include "Anime.h"
 
 #include <Arduino.h>
+#include <esp_sleep.h>
 
 #include "web/SocketController.h"
+#include "PropertySystem.h"
+#include "Property.h"
 
 namespace {
 
 std::array<CRGB, LED_LIMIT> leds = {};
 
 size_t currentLeds = 0;
-uint8_t currentBrightness = 255;
+
+// Persistent property with automatic debounced saving (1 second default)
+PROPERTY_LOCAL(brightness, uint8_t, 255, true);  // persistent=true
 
 std::vector<String> shaders = {};
 std::vector<LuaAnimation *> loadedAnimations = {};
@@ -25,6 +30,53 @@ uint32_t animationIteration = 0;
 float deltaTime = 0;
 
 uint32_t lastSocketSendMillist = 0;
+
+// Power saving
+uint32_t lastNonBlackTime = 0;
+bool inPowerSaveMode = false;
+const uint32_t POWER_SAVE_TIMEOUT = 60000;  // 1 minute
+
+// Atmospheric fade (like kerosene lamp running out)
+bool atmosphericFadeEnabled = false;
+uint32_t lastFadeUpdate = 0;
+const uint32_t FADE_INTERVAL = 30 * 1000;  // 30 seconds between brightness decrements (255 * 30s = 127.5 min ≈ 2 hours)
+
+bool areAllLedsBlack() {
+    for (size_t i = 0; i < currentLeds; i++) {
+        if (leds[i].r != 0 || leds[i].g != 0 || leds[i].b != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void enterPowerSaveMode() {
+    if (inPowerSaveMode) return;
+
+    Serial.println("[Anime] Entering power save mode with light sleep");
+    inPowerSaveMode = true;
+    FastLED.clear(true);
+}
+
+void exitPowerSaveMode() {
+    if (!inPowerSaveMode) return;
+
+    Serial.println("[Anime] Waking from power save mode");
+    inPowerSaveMode = false;
+    lastNonBlackTime = millis();
+}
+
+void updateAtmosphericFade() {
+    if (!atmosphericFadeEnabled) return;
+    if (millis() - lastFadeUpdate < FADE_INTERVAL) return;
+
+    lastFadeUpdate = millis();
+    uint8_t current = brightness.get();
+    if (current > 0) {
+        brightness = current - 1;
+        Serial.printf("[Anime] Atmospheric fade: brightness reduced to %d\n", current - 1);
+    }
+}
 
 void sendLedsToSocket() {
     if (millis() - lastSocketSendMillist < 100) {
@@ -166,9 +218,6 @@ CallResult<void *> connect() {
     int cl = ShaderStorage::get().getProperty("activeLeds", String(LED_LIMIT)).toInt();
     currentLeds = std::min(200, std::max(0, cl));
 
-    int br = ShaderStorage::get().getProperty("brightness", String(255)).toInt();
-    currentBrightness = std::min(255, std::max(0, br));
-
     CallResult<void *> loadResult = reload();
     if (loadResult.hasError()) {
         return loadResult;
@@ -208,6 +257,15 @@ CallResult<void *> draw() {
     Anime::sampleTime();
     Anime::incIter();
 
+    // Use light sleep in power save mode
+    if (inPowerSaveMode) {
+        // Enter light sleep for 500ms (or until GPIO wakeup)
+        // WiFi and network connections remain active in light sleep
+        esp_sleep_enable_timer_wakeup(500000);  // 500ms in microseconds
+        esp_light_sleep_start();
+        return CallResult<void *>(nullptr, 200);
+    }
+
     if (toReload) {
         CallResult<void *> reloadResult = reload();
         if (reloadResult.hasError()) {
@@ -215,6 +273,9 @@ CallResult<void *> draw() {
         }
         toReload = false;
     }
+
+    // Update atmospheric fade (reduce brightness gradually)
+    updateAtmosphericFade();
 
     if (currentAnimation == nullptr) {
         FastLED.clear(true);
@@ -226,6 +287,18 @@ CallResult<void *> draw() {
         }
         FastLED.show();
     }
+
+    // Check for power saving
+    if (areAllLedsBlack()) {
+        if (lastNonBlackTime == 0) {
+            lastNonBlackTime = millis();
+        } else if (millis() - lastNonBlackTime > POWER_SAVE_TIMEOUT) {
+            enterPowerSaveMode();
+        }
+    } else {
+        lastNonBlackTime = millis();
+    }
+
     sendLedsToSocket();
     lastUpdate = millis();
 
@@ -244,11 +317,12 @@ void setCurrentLeds(size_t acurrentLeds) {
     ShaderStorage::get().saveProperty("activeLeds", String(currentLeds));
 }
 
-uint8_t getBrightness() { return currentBrightness; }
+uint8_t getBrightness() {
+    return brightness.get();
+}
 
-void setBrightness(uint8_t brightness) {
-    currentBrightness = brightness;
-    ShaderStorage::get().saveProperty("brightness", String(currentBrightness));
+void setBrightness(uint8_t newBrightness) {
+    brightness = newBrightness;
 }
 
 String getCurrent() {
@@ -281,4 +355,24 @@ float getDeltaTime() { return deltaTime; }
 
 void sampleTime() { animationTime = millis(); }
 void incIter() { animationIteration++; }
+
+void wakeUp() {
+    exitPowerSaveMode();
+}
+
+void enableAtmosphericFade() {
+    atmosphericFadeEnabled = true;
+    lastFadeUpdate = millis();
+    Serial.println("[Anime] Atmospheric fade enabled");
+}
+
+void disableAtmosphericFade() {
+    atmosphericFadeEnabled = false;
+    Serial.println("[Anime] Atmospheric fade disabled");
+}
+
+bool isAtmosphericFadeEnabled() {
+    return atmosphericFadeEnabled;
+}
+
 }  // namespace Anime

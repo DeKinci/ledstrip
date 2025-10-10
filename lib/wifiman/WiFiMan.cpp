@@ -1,0 +1,465 @@
+#include "WiFiMan.h"
+
+namespace WiFiMan {
+
+WiFiManager* WiFiManager::instance = nullptr;
+
+WiFiManager::WiFiManager(AsyncWebServer* server)
+    : webServer(server),
+      dnsServer(nullptr),
+      state(State::IDLE),
+      apSSID("ESP32-Setup"),
+      apPassword(""),
+      hostname("esp32"),
+      connectionTimeout(15000),
+      retryDelay(5000),
+      apTimeout(0),
+      stateStartTime(0),
+      lastConnectionAttempt(0),
+      apStartTime(0),
+      webConnectRequestTime(0),
+      currentNetworkIndex(-1),
+      consecutiveFailures(0) {
+
+    instance = this;
+    creds.load();
+}
+
+WiFiManager::~WiFiManager() {
+    if (dnsServer) {
+        delete dnsServer;
+    }
+    instance = nullptr;
+}
+
+void WiFiManager::setAPCredentials(const String& ssid, const String& password) {
+    apSSID = ssid;
+    apPassword = password;
+}
+
+void WiFiManager::setConnectionTimeout(uint32_t timeoutMs) {
+    connectionTimeout = timeoutMs;
+}
+
+void WiFiManager::setRetryDelay(uint32_t delayMs) {
+    retryDelay = delayMs;
+}
+
+void WiFiManager::setAPTimeout(uint32_t timeoutMs) {
+    apTimeout = timeoutMs;
+}
+
+void WiFiManager::setHostname(const String& name) {
+    hostname = name;
+}
+
+void WiFiManager::begin() {
+    Serial.println("[WiFiMan] Starting WiFi Manager");
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(hostname.c_str());
+
+    // Register WiFi event handler
+    WiFi.onEvent([](WiFiEvent_t event) {
+        if (instance) {
+            instance->handleWiFiEvent(event);
+        }
+    });
+
+    // Setup web UI routes (available in both AP and STA modes)
+    setupWebServer();
+
+    if (creds.getAll().empty()) {
+        Serial.println("[WiFiMan] No credentials stored, starting AP mode");
+        transitionToState(State::AP_MODE);
+    } else {
+        Serial.printf("[WiFiMan] Found %d saved network(s), starting scan\n", creds.getAll().size());
+        transitionToState(State::SCANNING);
+    }
+}
+
+void WiFiManager::disconnect() {
+    WiFi.disconnect();
+    transitionToState(State::IDLE);
+}
+
+void WiFiManager::startAP() {
+    transitionToState(State::AP_MODE);
+}
+
+void WiFiManager::stopAP() {
+    if (state == State::AP_MODE) {
+        WiFi.softAPdisconnect(true);
+        teardownWebServer();
+        transitionToState(State::IDLE);
+    }
+}
+
+void WiFiManager::retry() {
+    if (state == State::FAILED || state == State::IDLE) {
+        lastConnectionAttempt = 0;
+        transitionToState(State::SCANNING);
+    }
+}
+
+void WiFiManager::loop() {
+    switch (state) {
+        case State::IDLE:
+            handleIdle();
+            break;
+        case State::SCANNING:
+            handleScanning();
+            break;
+        case State::CONNECTING:
+            handleConnecting();
+            break;
+        case State::CONNECTED:
+            handleConnected();
+            break;
+        case State::AP_MODE:
+            handleAPMode();
+            break;
+        case State::FAILED:
+            handleFailed();
+            break;
+    }
+
+    // Process DNS for captive portal
+    if (dnsServer) {
+        dnsServer->processNextRequest();
+    }
+}
+
+String WiFiManager::getStateString() const {
+    switch (state) {
+        case State::IDLE: return "IDLE";
+        case State::SCANNING: return "SCANNING";
+        case State::CONNECTING: return "CONNECTING";
+        case State::CONNECTED: return "CONNECTED";
+        case State::AP_MODE: return "AP_MODE";
+        case State::FAILED: return "FAILED";
+        default: return "UNKNOWN";
+    }
+}
+
+String WiFiManager::getCurrentSSID() const {
+    if (state == State::CONNECTED) {
+        return WiFi.SSID();
+    } else if (state == State::AP_MODE) {
+        return apSSID;
+    }
+    return "";
+}
+
+IPAddress WiFiManager::getIP() const {
+    if (state == State::CONNECTED) {
+        return WiFi.localIP();
+    } else if (state == State::AP_MODE) {
+        return WiFi.softAPIP();
+    }
+    return IPAddress(0, 0, 0, 0);
+}
+
+void WiFiManager::onConnected(std::function<void(const String& ssid)> callback) {
+    connectedCallback = callback;
+}
+
+void WiFiManager::onDisconnected(std::function<void()> callback) {
+    disconnectedCallback = callback;
+}
+
+void WiFiManager::onAPStarted(std::function<void(const String& ssid)> callback) {
+    apStartedCallback = callback;
+}
+
+void WiFiManager::onAPClientConnected(std::function<void(uint8_t numClients)> callback) {
+    apClientConnectedCallback = callback;
+}
+
+void WiFiManager::handleIdle() {
+    // Do nothing, wait for user action
+}
+
+void WiFiManager::handleScanning() {
+    // Scanning is async, wait for completion or timeout
+    if (WiFi.scanComplete() >= 0) {
+        scanAvailableNetworks();
+
+        // Only proceed to CONNECTING if we found available networks
+        if (!availableNetworks.empty()) {
+            transitionToState(State::CONNECTING);
+        } else {
+            Serial.println("[WiFiMan] No saved networks are available");
+            transitionToState(State::FAILED);
+        }
+    } else if (millis() - stateStartTime > 10000) {
+        Serial.println("[WiFiMan] Scan timeout");
+        transitionToState(State::FAILED);
+    }
+}
+
+void WiFiManager::handleConnecting() {
+    // Check if connection succeeded
+    if (WiFi.status() == WL_CONNECTED) {
+        transitionToState(State::CONNECTED);
+        return;
+    }
+
+    // Check for timeout
+    if (millis() - stateStartTime > connectionTimeout) {
+        Serial.println("[WiFiMan] Connection timeout");
+        ConnectionResult result = tryNextNetwork();
+
+        if (result == ConnectionResult::NO_NETWORKS_AVAILABLE ||
+            result == ConnectionResult::NO_CREDENTIALS) {
+            transitionToState(State::FAILED);
+        }
+        // If result is IN_PROGRESS, we stay in CONNECTING state
+    }
+}
+
+void WiFiManager::handleConnected() {
+    // Monitor connection health
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WiFiMan] Connection lost, rescanning");
+        if (disconnectedCallback) {
+            disconnectedCallback();
+        }
+        // Re-scan to find available networks
+        transitionToState(State::SCANNING);
+    }
+}
+
+void WiFiManager::handleAPMode() {
+    updateAPClients();
+
+    // Check for web-initiated connection request
+    if (webConnectRequestTime > 0 && millis() - webConnectRequestTime > 100) {
+        webConnectRequestTime = 0;
+        consecutiveFailures = 0;  // Reset failure counter on manual retry
+        Serial.println("[WiFiMan] Processing web connect request");
+        stopAP();
+        retry();
+        return;
+    }
+
+    // Check for AP timeout
+    if (apTimeout > 0 && millis() - apStartTime > apTimeout) {
+        Serial.println("[WiFiMan] AP timeout, retrying connection");
+        stopAP();
+        retry();
+    }
+}
+
+void WiFiManager::handleFailed() {
+    // Auto-retry after delay, but with a limit
+    if (millis() - lastConnectionAttempt > retryDelay) {
+        consecutiveFailures++;
+
+        if (consecutiveFailures >= 3) {
+            Serial.println("[WiFiMan] Too many failures, starting AP mode");
+            consecutiveFailures = 0;
+            transitionToState(State::AP_MODE);
+        } else {
+            Serial.printf("[WiFiMan] Retrying connection after failure (attempt %d/3)\n", consecutiveFailures + 1);
+            retry();
+        }
+    }
+}
+
+void WiFiManager::startScanning() {
+    Serial.println("[WiFiMan] Starting network scan");
+    WiFi.scanNetworks(true);  // Async scan
+}
+
+void WiFiManager::startConnecting() {
+    // Use availableNetworks (already filtered and sorted) instead of all networks
+    sortedNetworks = availableNetworks;
+    currentNetworkIndex = -1;
+    tryNextNetwork();
+}
+
+ConnectionResult WiFiManager::tryNextNetwork() {
+    currentNetworkIndex++;
+
+    if (sortedNetworks.empty() || currentNetworkIndex >= sortedNetworks.size()) {
+        Serial.println("[WiFiMan] No more networks to try");
+        return sortedNetworks.empty() ? ConnectionResult::NO_CREDENTIALS : ConnectionResult::NO_NETWORKS_AVAILABLE;
+    }
+
+    NetworkCredential* cred = sortedNetworks[currentNetworkIndex];
+    Serial.printf("[WiFiMan] Attempting connection to '%s' (priority: %d, RSSI: %d)\n",
+                  cred->ssid.c_str(), cred->priority, cred->lastRSSI);
+
+    // Non-blocking disconnect and connect
+    WiFi.disconnect(false, false);  // Don't erase config, don't wait
+    WiFi.begin(cred->ssid.c_str(), cred->password.c_str());
+
+    stateStartTime = millis();
+    return ConnectionResult::IN_PROGRESS;
+}
+
+void WiFiManager::scanAvailableNetworks() {
+    int n = WiFi.scanComplete();
+    if (n < 0) return;
+
+    Serial.printf("[WiFiMan] Scan found %d networks\n", n);
+
+    // Clear previous available networks
+    availableNetworks.clear();
+
+    // Print all scanned networks
+    for (int i = 0; i < n; i++) {
+        Serial.printf("[WiFiMan]   Scanned: '%s' (RSSI: %d)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+    }
+
+    // Print all saved networks
+    auto allSaved = creds.getAll();
+    Serial.printf("[WiFiMan] Have %d saved network(s):\n", allSaved.size());
+    for (const auto& saved : allSaved) {
+        Serial.printf("[WiFiMan]   Saved: '%s'\n", saved.ssid.c_str());
+    }
+
+    // Build list of scanned SSIDs for quick lookup
+    std::vector<String> scannedSSIDs;
+    for (int i = 0; i < n; i++) {
+        scannedSSIDs.push_back(WiFi.SSID(i));
+    }
+
+    // Update RSSI and build available networks list
+    for (int i = 0; i < n; i++) {
+        String ssid = WiFi.SSID(i);
+        int8_t rssi = WiFi.RSSI(i);
+
+        if (creds.hasNetwork(ssid)) {
+            creds.updateRSSI(ssid, rssi);
+            Serial.printf("[WiFiMan]   Match found: %s (RSSI: %d)\n", ssid.c_str(), rssi);
+        }
+    }
+
+    // Get only networks that are both saved AND currently available
+    auto sortedSaved = creds.getSortedNetworks();
+    for (auto* net : sortedSaved) {
+        // Check if this saved network was found in the scan
+        bool found = false;
+        for (const auto& scannedSSID : scannedSSIDs) {
+            if (scannedSSID == net->ssid) {
+                found = true;
+                break;
+            }
+        }
+
+        if (found) {
+            availableNetworks.push_back(net);
+        }
+    }
+
+    Serial.printf("[WiFiMan] %d saved network(s) are currently available\n",
+                  availableNetworks.size());
+
+    for (const auto* net : availableNetworks) {
+        Serial.printf("[WiFiMan]   -> %s (Priority: %d, RSSI: %d dBm)\n",
+                     net->ssid.c_str(), net->priority, net->lastRSSI);
+    }
+
+    WiFi.scanDelete();
+}
+
+void WiFiManager::transitionToState(State newState) {
+    if (state == newState) return;
+
+    Serial.printf("[WiFiMan] State transition: %s -> %s\n",
+                  getStateString().c_str(),
+                  newState == State::IDLE ? "IDLE" :
+                  newState == State::SCANNING ? "SCANNING" :
+                  newState == State::CONNECTING ? "CONNECTING" :
+                  newState == State::CONNECTED ? "CONNECTED" :
+                  newState == State::AP_MODE ? "AP_MODE" : "FAILED");
+
+    State oldState = state;
+    state = newState;
+    stateStartTime = millis();
+
+    switch (newState) {
+        case State::SCANNING:
+            startScanning();
+            break;
+
+        case State::CONNECTING:
+            startConnecting();
+            break;
+
+        case State::CONNECTED:
+            Serial.printf("[WiFiMan] Connected to '%s', IP: %s\n",
+                         WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+            creds.updateLastConnected(WiFi.SSID(), millis());
+            consecutiveFailures = 0;  // Reset failure counter on success
+            if (connectedCallback) {
+                connectedCallback(WiFi.SSID());
+            }
+            break;
+
+        case State::AP_MODE:
+            WiFi.mode(WIFI_AP_STA);  // Use AP_STA to allow scanning while AP is running
+            WiFi.softAP(apSSID.c_str(), apPassword.c_str());
+            Serial.printf("[WiFiMan] AP started: %s, IP: %s\n",
+                         apSSID.c_str(), WiFi.softAPIP().toString().c_str());
+
+            // Setup captive portal DNS
+            if (!dnsServer) {
+                dnsServer = new DNSServer();
+            }
+            dnsServer->start(53, "*", WiFi.softAPIP());
+
+            // Web routes already setup in begin()
+            apStartTime = millis();
+
+            if (apStartedCallback) {
+                apStartedCallback(apSSID);
+            }
+            break;
+
+        case State::FAILED:
+            Serial.println("[WiFiMan] Failed to connect, will retry or start AP");
+            lastConnectionAttempt = millis();
+
+            // If we've never been connected and have no other options, start AP
+            if (creds.getAll().empty()) {
+                transitionToState(State::AP_MODE);
+            }
+            break;
+
+        default:
+            break;
+    }
+}
+
+void WiFiManager::updateAPClients() {
+    static uint8_t lastClientCount = 0;
+    uint8_t clientCount = WiFi.softAPgetStationNum();
+
+    if (clientCount != lastClientCount) {
+        Serial.printf("[WiFiMan] AP clients: %d\n", clientCount);
+        lastClientCount = clientCount;
+        if (apClientConnectedCallback) {
+            apClientConnectedCallback(clientCount);
+        }
+    }
+}
+
+void WiFiManager::handleWiFiEvent(WiFiEvent_t event) {
+    switch (event) {
+        case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+            Serial.println("[WiFiMan] WiFi connected event");
+            break;
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+            Serial.println("[WiFiMan] WiFi disconnected event");
+            break;
+        case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+            Serial.println("[WiFiMan] Got IP event");
+            break;
+        default:
+            break;
+    }
+}
+
+} // namespace WiFiMan

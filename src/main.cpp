@@ -2,7 +2,7 @@
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-#include <NetWizard.h>
+#include <WiFiMan.h>
 #include <NimBLEDevice.h>
 #include <FastLED.h>
 
@@ -11,10 +11,10 @@
 #include "web/SocketController.h"
 #include "ble/BleClient.hpp"
 #include "input/EncoderInput.hpp"
+#include "PropertySystem.h"
 
-DNSServer dnsServer;
 AsyncWebServer server(80);
-NetWizard NW(&server);
+WiFiMan::WiFiManager wifiManager(&server);
 
 CallResult<void*> status(nullptr);
 
@@ -28,16 +28,20 @@ void setup() {
     Serial.println("\n=== Memory Usage Tracking ===");
     Serial.printf("1. Boot: Free heap: %d bytes\n", ESP.getFreeHeap());
 
+    // Initialize property system first (includes loadFromStorage)
+    MicroProto::PropertySystem::init();
+    Serial.printf("2. After PropertySystem: Free heap: %d bytes\n", ESP.getFreeHeap());
+
     EncoderInput::init();
-    Serial.printf("2. After EncoderInput: Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("3. After EncoderInput: Free heap: %d bytes\n", ESP.getFreeHeap());
 
     // BleClient::init();
-    Serial.printf("3. After BleClient: Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("4. After BleClient: Free heap: %d bytes\n", ESP.getFreeHeap());
     // BleClient::scan();
 
     // Initialize web server and routes
-    WebServer::init(server, NW);
-    Serial.printf("4. After WebServer init: Free heap: %d bytes\n", ESP.getFreeHeap());
+    WebServer::init(server, wifiManager);
+    Serial.printf("5. After WebServer init: Free heap: %d bytes\n", ESP.getFreeHeap());
 
     // Add health endpoint (specific to main.cpp status)
     server.on("/health", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -45,7 +49,7 @@ void setup() {
     });
 
     ShaderStorage::init();
-    Serial.printf("5. After ShaderStorage: Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("6. After ShaderStorage: Free heap: %d bytes\n", ESP.getFreeHeap());
 
     status = Anime::connect();
     while (status.hasError()) {
@@ -54,10 +58,10 @@ void setup() {
         delay(1000);
         status = Anime::connect();
     }
-    Serial.printf("6. After Anime connect: Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("7. After Anime connect: Free heap: %d bytes\n", ESP.getFreeHeap());
 
     WebServer::begin(server);
-    Serial.printf("7. After WebServer begin: Free heap: %d bytes\n", ESP.getFreeHeap());
+    Serial.printf("8. After WebServer begin: Free heap: %d bytes\n", ESP.getFreeHeap());
     Serial.println("=== Setup Complete ===\n");
 }
 
@@ -71,11 +75,14 @@ void loop() {
     loopTimestampMillis = millis();
     loopIteration++;
 
+    // Property system handles debounced saving
+    MicroProto::PropertySystem::loop();
+
     EncoderInput::loop();
 
     // BleClient::loop();
 
-    NW.loop();
+    wifiManager.loop();
 
     SocketController::cleanUp();
     status = Anime::draw();

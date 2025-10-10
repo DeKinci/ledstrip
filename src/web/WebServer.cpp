@@ -8,36 +8,39 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 
-void WebServer::init(AsyncWebServer& server, NetWizard& nw) {
-    WiFi.disconnect();
-    WiFi.mode(WIFI_OFF);
+void WebServer::init(AsyncWebServer& server, WiFiMan::WiFiManager& wifiMan) {
+    // Configure WiFiMan BEFORE server.reset() so routes are registered
+    wifiMan.setAPCredentials("SmartGarland", "");
+    wifiMan.setHostname("led");
 
-    server.reset();
+    // Setup callbacks
+    wifiMan.onConnected([](const String& ssid) {
+        Serial.printf("\n✓ WiFi connected to: %s\n", ssid.c_str());
+        Serial.printf("  IP: %s\n", WiFi.localIP().toString().c_str());
 
-    nw.setStrategy(NetWizardStrategy::NON_BLOCKING);
-    nw.autoConnect("LED", "");
-    Serial.print("Connected to wifi: ");
-    Serial.println(WiFi.localIP());
+        // Start mDNS
+        if (MDNS.begin("led")) {
+            MDNS.addService("http", "tcp", 80);
+            Serial.println("  mDNS: http://led.local/");
+        }
+    });
 
-    if (!MDNS.begin("led")) {
-        Serial.println("Error starting mDNS");
-        return;
-    }
-    MDNS.addService("http", "tcp", 80);
+    wifiMan.onDisconnected([]() {
+        Serial.println("✗ WiFi disconnected");
+    });
+
+    wifiMan.onAPStarted([](const String& ssid) {
+        Serial.printf("\n⚠ AP Mode: %s\n", ssid.c_str());
+        Serial.printf("  Connect and visit: http://%s/\n", WiFi.softAPIP().toString().c_str());
+    });
+
+    // Start WiFi manager (non-blocking) - this sets up web routes
+    wifiMan.begin();
 
     // CORS headers
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Origin", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Headers", "*");
     DefaultHeaders::Instance().addHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
-
-    // 404 handler with OPTIONS support
-    server.onNotFound([](AsyncWebServerRequest *request) {
-        if (request->method() == HTTP_OPTIONS) {
-            request->send(200);
-        } else {
-            request->send(404);
-        }
-    });
 
     // Basic routes
     server.on("/ping", HTTP_GET, [](AsyncWebServerRequest *request) {
@@ -51,7 +54,8 @@ void WebServer::init(AsyncWebServer& server, NetWizard& nw) {
         request->send(200, "text/plain", "Rebooting and formatting FS...");
     });
 
-    server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    // Main app UI at /index (not at / to avoid conflict with WiFiMan captive portal)
+    server.on("/index", HTTP_GET, [](AsyncWebServerRequest *request) {
         request->send_P(200, "text/html", index_html, templateProcessor);
     });
 

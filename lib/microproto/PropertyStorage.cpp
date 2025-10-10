@@ -1,9 +1,12 @@
 #include "PropertyStorage.h"
+#include <Logger.h>
 #include <Arduino.h>
 #include <nvs_flash.h>
 #include <nvs.h>
 
 namespace MicroProto {
+
+static const char* TAG = "PropertyStorage";
 
 bool PropertyStorage::initialized = false;
 
@@ -13,13 +16,14 @@ void PropertyStorage::init() {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // NVS partition was truncated, erase and retry
+        LOG_WARN(TAG, "NVS partition issue, erasing and retrying");
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK(err);
 
     initialized = true;
-    Serial.println("[PropertyStorage] NVS initialized");
+    LOG_INFO(TAG, "NVS initialized");
 }
 
 void PropertyStorage::makeKey(uint8_t property_id, char* buffer, size_t buffer_size) {
@@ -33,7 +37,7 @@ bool PropertyStorage::save(PropertyBase* property) {
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
-        Serial.printf("[PropertyStorage] Failed to open NVS: %s\n", esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
         return false;
     }
 
@@ -45,8 +49,7 @@ bool PropertyStorage::save(PropertyBase* property) {
 
     err = nvs_set_blob(handle, key, data, size);
     if (err != ESP_OK) {
-        Serial.printf("[PropertyStorage] Failed to save property %d: %s\n",
-                     property->id, esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to save property %d: %s", property->id, esp_err_to_name(err));
         nvs_close(handle);
         return false;
     }
@@ -55,11 +58,10 @@ bool PropertyStorage::save(PropertyBase* property) {
     nvs_close(handle);
 
     if (err == ESP_OK) {
-        Serial.printf("[PropertyStorage] Saved property %d (%s)\n", property->id, property->name);
+        LOG_INFO(TAG, "Saved property %d (%s)", property->id, property->name);
         return true;
     } else {
-        Serial.printf("[PropertyStorage] Failed to commit property %d: %s\n",
-                     property->id, esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to commit property %d: %s", property->id, esp_err_to_name(err));
         return false;
     }
 }
@@ -72,6 +74,7 @@ bool PropertyStorage::load(PropertyBase* property) {
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
     if (err != ESP_OK) {
         // Namespace doesn't exist yet, not an error
+        LOG_DEBUG(TAG, "NVS namespace not found (first boot?)");
         return false;
     }
 
@@ -83,13 +86,14 @@ bool PropertyStorage::load(PropertyBase* property) {
     err = nvs_get_blob(handle, key, nullptr, &size);
     if (err != ESP_OK || size == 0) {
         nvs_close(handle);
+        LOG_DEBUG(TAG, "Property %d (%s) not found in storage", property->id, property->name);
         return false;
     }
 
     // Check size matches
     if (size != property->getSize()) {
-        Serial.printf("[PropertyStorage] Size mismatch for property %d: expected %d, got %d\n",
-                     property->id, property->getSize(), size);
+        LOG_ERROR(TAG, "Size mismatch for property %d: expected %d, got %d",
+                 property->id, property->getSize(), size);
         nvs_close(handle);
         return false;
     }
@@ -101,12 +105,11 @@ bool PropertyStorage::load(PropertyBase* property) {
 
     if (err == ESP_OK) {
         property->setData(buffer, size);
-        Serial.printf("[PropertyStorage] Loaded property %d (%s)\n", property->id, property->name);
+        LOG_INFO(TAG, "Loaded property %d (%s)", property->id, property->name);
         delete[] buffer;
         return true;
     } else {
-        Serial.printf("[PropertyStorage] Failed to load property %d: %s\n",
-                     property->id, esp_err_to_name(err));
+        LOG_ERROR(TAG, "Failed to load property %d: %s", property->id, esp_err_to_name(err));
         delete[] buffer;
         return false;
     }
@@ -141,7 +144,7 @@ bool PropertyStorage::eraseAll() {
     nvs_commit(handle);
     nvs_close(handle);
 
-    Serial.println("[PropertyStorage] Erased all properties");
+    LOG_WARN(TAG, "Erased all properties");
     return (err == ESP_OK);
 }
 

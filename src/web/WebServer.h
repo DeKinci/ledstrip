@@ -3,11 +3,11 @@
 
 #include <Arduino.h>
 #include <ESPAsyncWebServer.h>
-#include <NetWizard.h>
+#include <WiFiMan.h>
 
 class WebServer {
 public:
-    static void init(AsyncWebServer& server, NetWizard& nw);
+    static void init(AsyncWebServer& server, WiFiMan::WiFiManager& wifiMan);
     static void begin(AsyncWebServer& server);
 
 private:

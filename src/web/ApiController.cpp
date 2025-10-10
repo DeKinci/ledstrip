@@ -6,19 +6,23 @@
 namespace ApiController {
 
 void onAddShader(AsyncWebServerRequest *request, JsonVariant &json) {
+    uint32_t start = millis();
     String name = json["name"].as<String>();
     String shader = json["shader"].as<String>();
-    Serial.println("Received shader " + name);
-    Serial.println("*** BEGIN SHADER ***");
-    Serial.println(shader);
-    Serial.println("*** END SHADER ***");
+    Serial.printf("[API] onAddShader start: %s (%d bytes)\n", name.c_str(), shader.length());
+
+    uint32_t beforeStore = millis();
     CallResult<void *> storeResult = ShaderStorage::get().storeShader(name, shader);
+    uint32_t afterStore = millis();
+    Serial.printf("[API] storeShader took %dms\n", afterStore - beforeStore);
+
     if (!storeResult.hasError()) {
         Anime::scheduleReload();
         request->send(200);
     } else {
         request->send(storeResult.getCode(), "text/plain", storeResult.getMessage());
     }
+    Serial.printf("[API] onAddShader total: %dms\n", millis() - start);
 }
 
 void onListShaders(AsyncWebServerRequest *request) {

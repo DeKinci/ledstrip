@@ -33,6 +33,12 @@ namespace Anime
 
     void sampleTime();
     void incIter();
+
+    void wakeUp();  // Wake from power save mode
+
+    void enableAtmosphericFade();   // Enable gradual brightness reduction (kerosene lamp effect)
+    void disableAtmosphericFade();  // Disable atmospheric fade
+    bool isAtmosphericFadeEnabled(); // Check if atmospheric fade is active
 };
 
 #endif // GARLAND_ANIMATION_MANAGER

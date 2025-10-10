@@ -4,9 +4,9 @@
 namespace {
 
 // Rotary Encoder Pins
-#define CLK 4
+#define CLK 3
 #define DT 2
-#define SW 3
+#define SW 4
 
 volatile int encoderPos = 0;
 volatile bool encoderChanged = false;
@@ -57,7 +57,13 @@ void init() {
     attachInterrupt(digitalPinToInterrupt(CLK), encoderISR, CHANGE);
     attachInterrupt(digitalPinToInterrupt(DT), encoderISR, CHANGE);
 
-    Serial.println("EncoderInput initialized with interrupts");
+    // Configure GPIO wakeup for light sleep power saving
+    gpio_wakeup_enable((gpio_num_t)CLK, GPIO_INTR_LOW_LEVEL);
+    gpio_wakeup_enable((gpio_num_t)DT, GPIO_INTR_LOW_LEVEL);
+    gpio_wakeup_enable((gpio_num_t)SW, GPIO_INTR_LOW_LEVEL);
+    esp_sleep_enable_gpio_wakeup();
+
+    Serial.println("EncoderInput initialized with interrupts and GPIO wakeup");
 }
 
 void loop() {
@@ -65,6 +71,9 @@ void loop() {
     if (encoderChanged && (millis() - lastEncoderUpdate > 50)) {
         encoderChanged = false;
         lastEncoderUpdate = millis();
+
+        // Wake from power save mode on any encoder activity
+        Anime::wakeUp();
 
         uint8_t brightness = Anime::getBrightness();
         int direction = encoderPos;
@@ -99,6 +108,8 @@ void loop() {
         // if 50ms have passed since last LOW pulse, it means that the
         // button has been pressed, released and pressed again
         if (millis() - lastButtonPress > 50) {
+            // Wake from power save mode on button press
+            Anime::wakeUp();
             Anime::nextAnimation();
             Serial.println("Button pressed - next animation");
         }
