@@ -33,8 +33,10 @@ uint32_t lastSocketSendMillist = 0;
 
 // Power saving
 uint32_t lastNonBlackTime = 0;
+uint32_t startupTime = 0;  // Track when system started
 bool inPowerSaveMode = false;
 const uint32_t POWER_SAVE_TIMEOUT = 60000;  // 1 minute
+const uint32_t STARTUP_GRACE_PERIOD = 5 * 60 * 1000;  // 5 minutes grace period after startup
 
 // Atmospheric fade (like kerosene lamp running out)
 bool atmosphericFadeEnabled = false;
@@ -79,6 +81,9 @@ void updateAtmosphericFade() {
 }
 
 void sendLedsToSocket() {
+    // Temporarily disabled to test network reliability
+    return;
+
     if (millis() - lastSocketSendMillist < 100) {
         return;
     }
@@ -215,6 +220,9 @@ CallResult<void *> reload() {
 namespace Anime {
 
 CallResult<void *> connect() {
+    // Record startup time for grace period
+    startupTime = millis();
+
     int cl = ShaderStorage::get().getProperty("activeLeds", String(LED_LIMIT)).toInt();
     currentLeds = std::min(200, std::max(0, cl));
 
@@ -288,15 +296,18 @@ CallResult<void *> draw() {
         FastLED.show();
     }
 
-    // Check for power saving
+    // Check for power saving (but skip during startup grace period)
+    uint32_t currentTime = millis();
+    bool inGracePeriod = (currentTime - startupTime) < STARTUP_GRACE_PERIOD;
+
     if (areAllLedsBlack()) {
         if (lastNonBlackTime == 0) {
-            lastNonBlackTime = millis();
-        } else if (millis() - lastNonBlackTime > POWER_SAVE_TIMEOUT) {
+            lastNonBlackTime = currentTime;
+        } else if (!inGracePeriod && (currentTime - lastNonBlackTime > POWER_SAVE_TIMEOUT)) {
             enterPowerSaveMode();
         }
     } else {
-        lastNonBlackTime = millis();
+        lastNonBlackTime = currentTime;
     }
 
     sendLedsToSocket();

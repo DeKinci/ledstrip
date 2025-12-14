@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BLE Devices - SmartGarland</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@3.9.2/dist/full.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.jsdelivr.net/gh/alpinejs/alpine@v2.3.5/dist/alpine.min.js" defer></script>
+</head>
+
+<body class="flex flex-col items-center mt-4 font-sans text-base bg-base-200 min-h-screen">
+    <div x-data="bleManager()" x-init="initialize()" class="w-full max-w-2xl p-4">
+        <!-- Header with navigation -->
+        <div class="flex justify-between items-center mb-6">
+            <h1 class="text-3xl font-bold">BLE Button Devices</h1>
+            <a href="/index" class="btn btn-sm btn-ghost">← Back to Shaders</a>
+        </div>
+
+        <div class="card bg-base-100 shadow-lg p-6">
+            <!-- Scan Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold mb-4">Scan for Devices</h2>
+                <div class="flex gap-2 items-center mb-4">
+                    <button @click="scanBle()" :disabled="bleScanning" class="btn btn-primary">
+                        <span x-text="bleScanning ? 'Scanning...' : 'Start Scan'"></span>
+                    </button>
+                    <span x-show="bleScanning" class="loading loading-spinner loading-md"></span>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    Scanning for HID devices (buttons, gamepads, keyboards). Make sure your device is in pairing mode.
+                </p>
+
+                <!-- Scan Results -->
+                <div x-show="bleScanResults.length > 0" class="mb-4">
+                    <h3 class="font-semibold mb-3 text-lg">Found Devices:</h3>
+                    <ul class="flex flex-col gap-3">
+                        <template x-for="device in bleScanResults" :key="device.address">
+                            <li class="p-4 rounded-lg border-2 border-base-300 flex justify-between items-center hover:border-primary transition">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-2xl" x-text="getDeviceIcon(device.icon)"></span>
+                                    <div>
+                                        <div class="font-semibold text-lg" x-text="device.name"></div>
+                                        <div class="text-sm text-gray-500" x-text="device.address"></div>
+                                    </div>
+                                </div>
+                                <button @click="addBleDevice(device)"
+                                        :disabled="isDeviceKnown(device.address)"
+                                        class="btn btn-sm"
+                                        :class="isDeviceKnown(device.address) ? 'btn-disabled' : 'btn-primary'"
+                                        x-text="isDeviceKnown(device.address) ? '✓ Added' : '+ Add Device'">
+                                </button>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+
+                <div x-show="!bleScanning && bleScanResults.length === 0" class="text-center text-gray-500 py-8 border-2 border-dashed border-base-300 rounded-lg">
+                    <div class="text-4xl mb-2">📡</div>
+                    <p>No devices found. Click "Start Scan" to search for BLE devices.</p>
+                </div>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Known Devices Section -->
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold mb-4">Known Devices</h2>
+                <p class="text-sm text-gray-600 mb-4">
+                    These devices will automatically connect when in range.
+                </p>
+                <ul class="flex flex-col gap-3">
+                    <template x-for="device in bleKnownDevices" :key="device.address">
+                        <li class="p-4 rounded-lg border-2 flex justify-between items-center transition"
+                            :class="isDeviceConnected(device.address) ? 'border-green-400 bg-green-50' : 'border-base-300'">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl" x-text="getDeviceIcon(device.icon)"></span>
+                                <div>
+                                    <div class="font-semibold text-lg" x-text="device.name"></div>
+                                    <div class="text-sm text-gray-500" x-text="device.address"></div>
+                                    <div x-show="isDeviceConnected(device.address)" class="flex items-center gap-1 mt-1">
+                                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                        <span class="text-sm text-green-600 font-semibold">Connected</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="flex gap-2">
+                                <button @click="removeBleDevice(device.address)" class="btn btn-sm btn-error">
+                                    Remove
+                                </button>
+                            </div>
+                        </li>
+                    </template>
+                    <li x-show="bleKnownDevices.length === 0" class="text-center text-gray-500 py-8 border-2 border-dashed border-base-300 rounded-lg">
+                        <div class="text-4xl mb-2">📱</div>
+                        <p>No known devices. Scan and add devices above to get started.</p>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="divider"></div>
+
+            <!-- Connected Devices Section -->
+            <div>
+                <h2 class="text-xl font-semibold mb-4">Currently Connected</h2>
+                <ul class="flex flex-col gap-3">
+                    <template x-for="device in bleConnectedDevices" :key="device.address">
+                        <li class="p-4 rounded-lg border-2 border-green-400 bg-green-50 flex justify-between items-center">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl" x-text="getDeviceIcon(device.icon)"></span>
+                                <div>
+                                    <div class="font-semibold text-lg" x-text="device.name"></div>
+                                    <div class="text-sm text-gray-500" x-text="device.address"></div>
+                                    <div class="flex items-center gap-1 mt-1">
+                                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                        <span class="text-sm text-green-600 font-semibold">Active</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="badge badge-success badge-lg">Connected</div>
+                        </li>
+                    </template>
+                    <li x-show="bleConnectedDevices.length === 0" class="text-center text-gray-500 py-8 border-2 border-dashed border-base-300 rounded-lg">
+                        <div class="text-4xl mb-2">🔌</div>
+                        <p>No devices currently connected.</p>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Info card -->
+        <div class="card bg-info text-info-content shadow-lg p-4 mt-4">
+            <h3 class="font-semibold mb-2">ℹ️ How it works</h3>
+            <ul class="text-sm space-y-1">
+                <li>• Only HID devices (buttons, gamepads, keyboards) are shown</li>
+                <li>• Added devices will auto-connect when in range</li>
+                <li>• Devices are saved and will reconnect after reboot</li>
+                <li>• Use button presses to control animations</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        
+        
+
+        function bleManager() {
+            return {
+                bleScanning: false,
+                bleScanResults: [],
+                bleKnownDevices: [],
+                bleConnectedDevices: [],
+                blePollInterval: null,
+
+                scanBle() {
+                    this.bleScanning = true;
+                    fetch('/api/ble/scan', { method: "POST" })
+                        .then(() => {
+                            setTimeout(() => this.pollScanResults(), 500);
+                        })
+                        .catch(err => {
+                            console.error("Scan failed:", err);
+                            this.bleScanning = false;
+                        });
+                },
+
+                pollScanResults() {
+                    fetch('/api/ble/scan/results')
+                        .then(r => r.json())
+                        .then(data => {
+                            this.bleScanResults = data.devices || [];
+                            this.bleScanning = data.scanning || false;
+                            if (this.bleScanning) {
+                                setTimeout(() => this.pollScanResults(), 1000);
+                            }
+                        })
+                        .catch(err => {
+                            console.error("Poll failed:", err);
+                            this.bleScanning = false;
+                        });
+                },
+
+                loadBleKnownDevices() {
+                    fetch('/api/ble/known')
+                        .then(r => r.json())
+                        .then(data => {
+                            this.bleKnownDevices = data.devices || [];
+                        })
+                        .catch(err => console.error("Failed to load known devices:", err));
+                },
+
+                loadBleConnectedDevices() {
+                    fetch('/api/ble/connected')
+                        .then(r => r.json())
+                        .then(data => {
+                            this.bleConnectedDevices = data.devices || [];
+                        })
+                        .catch(err => console.error("Failed to load connected devices:", err));
+                },
+
+                addBleDevice(device) {
+                    const data = {
+                        address: device.address,
+                        name: device.name,
+                        icon: device.icon,
+                        autoConnect: true
+                    };
+                    fetch('/api/ble/known', {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(data),
+                    })
+                    .then(() => {
+                        this.loadBleKnownDevices();
+                    })
+                    .catch(err => console.error("Failed to add device:", err));
+                },
+
+                removeBleDevice(address) {
+                    if (!confirm("Remove this device?")) return;
+
+                    fetch(`/api/ble/known/${address}`, { method: "DELETE" })
+                        .then(() => {
+                            this.loadBleKnownDevices();
+                            this.loadBleConnectedDevices();
+                        })
+                        .catch(err => console.error("Failed to remove device:", err));
+                },
+
+                isDeviceKnown(address) {
+                    return this.bleKnownDevices.some(d => d.address === address);
+                },
+
+                isDeviceConnected(address) {
+                    return this.bleConnectedDevices.some(d => d.address === address);
+                },
+
+                getDeviceIcon(icon) {
+                    const icons = {
+                        'camera': '📷',
+                        'media': '🎮',
+                        'gamepad': '🎮',
+                        'keyboard': '⌨️',
+                        'heart': '❤️',
+                        'phone': '📱',
+                        'watch': '⌚',
+                        'computer': '💻',
+                        'headset': '🎧',
+                        'generic': '📱'
+                    };
+                    return icons[icon] || icons['generic'];
+                },
+
+                startBlePoll() {
+                    this.loadBleKnownDevices();
+                    this.loadBleConnectedDevices();
+                    // Poll connected devices every 5 seconds
+                    this.blePollInterval = setInterval(() => {
+                        this.loadBleConnectedDevices();
+                    }, 5000);
+                },
+
+                initialize() {
+                    this.startBlePoll();
+                }
+            };
+        }
+    </script>
+</body>
+
+</html>

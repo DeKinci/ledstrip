@@ -117,9 +117,6 @@ void loop() {
         // Remember last button press event
         lastButtonPress = millis();
     }
-
-    // Small delay
-    delay(1);
 }
 
 }  // namespace EncoderInput

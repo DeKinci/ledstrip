@@ -20,6 +20,10 @@
         </template>
     </div>
     <div x-data="shaders()" x-init="initialize()" class="w-full max-w-xl p-4 card bg-base-100 shadow-lg">
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-2xl font-bold">LED Control</h1>
+            <a href="/ble" class="btn btn-sm btn-ghost">BLE Devices →</a>
+        </div>
         <div class="flex flex-row items-center gap-4">
             <p class="text-m">Led limit</p>
             <input type="number" min="0" max="200" x-model.number="ledLimit"
@@ -62,10 +66,6 @@ end
     </div>
 
     <script>
-        var serverIp = "%SELF_IP%";
-        if (serverIp.includes("SELF_IP")) serverIp = "led.local";
-        var gateway = `ws://${serverIp}/control`;
-
         var editor = ace.edit("editor");
         editor.setTheme("ace/theme/monokai");
         editor.session.setMode("ace/mode/lua");
@@ -90,21 +90,23 @@ end
                 addShader() {
                     if (!this.inputValue) return;
                     const data = { name: this.inputValue, shader: editor.getValue() };
-                    fetch(`http://${serverIp}/api/shader`, {
+                    fetch('/api/shader', {
                         method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(data),
                     }).then(() => (this.inputValue = ""));
                 },
                 deleteShader(id) {
-                    fetch(`http://${serverIp}/api/shader/${id}`, { method: "DELETE" });
+                    fetch(`/api/shader/${id}`, { method: "DELETE" });
                 },
                 initWebSocket() {
-                    this.websocket = new WebSocket(gateway);
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/control`;
+                    this.websocket = new WebSocket(wsUrl);
                     this.websocket.onopen = () => console.log("Connection opened");
                     this.websocket.onclose = () => {
                         console.log("Connection closed");
-                        setTimeout(this.initWebSocket, 2000);
+                        setTimeout(() => this.initWebSocket(), 2000);
                     };
                     this.websocket.onmessage = this.handleMessage.bind(this);
                 },
@@ -164,11 +166,11 @@ end
                     createHueCheatsheet();
 
                     this.initWebSocket();
-                    fetch(`http://${serverIp}/api/shader`)
+                    fetch('/api/shader')
                         .then(r => r.json())
                         .then(data => {
                             this.shaders = data.shader.map(name => ({ name, selected: false }));
-                            fetch(`http://${serverIp}/api/show`)
+                            fetch('/api/show')
                                 .then(r => r.json())
                                 .then(data => {
                                     this.updateSelectedByName(data.name);
@@ -177,7 +179,7 @@ end
                         });
                 },
                 editShader(name) {
-                    fetch(`http://${serverIp}/api/shader/${name}`)
+                    fetch(`/api/shader/${name}`)
                         .then(r => r.json())
                         .then(data => {
                             this.inputValue = name;

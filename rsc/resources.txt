@@ -1,0 +1,7 @@
+# Web Resources Configuration
+# Format: <filename> <processing_type>
+# Processing types: brotli, original
+# Lines starting with # are ignored
+
+index.htm original
+ble.htm original

@@ -1,7 +1,8 @@
 #include "BleButton.hpp"
 #include "animations/Anime.h"
 
-BleButton::BleButton(NimBLEAddress foundAddr) {
+// Legacy constructor - connects to a device by address
+BleButton::BleButton(NimBLEAddress foundAddr) : managedClient(true) {
     NimBLEClient* client = NimBLEDevice::getDisconnectedClient();
     if (!client) {
         client = NimBLEDevice::createClient();
@@ -17,6 +18,14 @@ BleButton::BleButton(NimBLEAddress foundAddr) {
     if (!client->connect(foundAddr, false, true, true)) {
         Serial.println("Connect failed");
         NimBLEDevice::deleteClient(client);
+    }
+}
+
+// New constructor - uses an already connected client
+BleButton::BleButton(NimBLEClient* client) : connectedClient(client), managedClient(false) {
+    if (client && client->isConnected()) {
+        // Client is already connected, just need to subscribe
+        shouldSubscribe = true;
     }
 }
 

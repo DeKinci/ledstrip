@@ -17,10 +17,22 @@ void PropertyStorage::init() {
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         // NVS partition was truncated, erase and retry
         LOG_WARN(TAG, "NVS partition issue, erasing and retrying");
-        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_erase();
+        if (err != ESP_OK) {
+            LOG_ERROR(TAG, "Failed to erase NVS: %s", esp_err_to_name(err));
+            // Continue anyway, mark as initialized to prevent crashes
+            initialized = true;
+            return;
+        }
         err = nvs_flash_init();
     }
-    ESP_ERROR_CHECK(err);
+
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "NVS initialization failed: %s", esp_err_to_name(err));
+        // Mark as initialized to prevent repeated init attempts and crashes
+        initialized = true;
+        return;
+    }
 
     initialized = true;
     LOG_INFO(TAG, "NVS initialized");
