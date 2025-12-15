@@ -1,39 +1,32 @@
 // MINIMAL TEST - Direct routing like latency test
 #include <Arduino.h>
 #include <WiFi.h>
-#include <WebSocketsServer.h>
 #include <HttpServer.h>
 #include <WiFiMan.h>
+#include <Property.h>
+#include <PropertySystem.h>
+#include <transport/MicroProtoServer.h>
 #include "rsc/w_index_htm.h"
+#include "rsc/w_proto_htm.h"
+#include "rsc/w_microproto_client_js.h"
 
 HttpServer http(80);
-WebSocketsServer webSocket(81);
+MicroProto::MicroProtoServer protoServer(81);
 WiFiMan::WiFiManager wifiManager(&httpDispatcher);
 
-void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload,
-                    size_t length) {
-    switch (type) {
-        case WStype_DISCONNECTED:
-            Serial.printf("[WS] Client %u disconnected\n", num);
-            break;
-        case WStype_CONNECTED: {
-            IPAddress ip = webSocket.remoteIP(num);
-            Serial.printf("[WS] Client %u connected from %s\n", num,
-                          ip.toString().c_str());
-        } break;
-        case WStype_TEXT:
-            Serial.printf("[WS] Client %u: %s\n", num, payload);
-            webSocket.broadcastTXT(payload, length);
-            break;
-        default:
-            break;
-    }
-}
+// Test properties
+PROPERTY_LOCAL(ledBrightness, uint8_t, 128, false, false, false);
+PROPERTY_LOCAL(speed, float, 1.0f, false, false, false);
+PROPERTY_LOCAL(enabled, bool, true, false, false, false);
 
 void setup() {
     Serial.begin(115200);
     delay(600);  // crucial for wifi
-    Serial.println("\n\n=== HTTP + WebSocket + WiFiMan ===");
+    Serial.println("\n\n=== HTTP + MicroProto + WiFiMan ===");
+
+    // Initialize property system
+    MicroProto::PropertySystem::init();
+    Serial.printf("Properties registered: %d\n", MicroProto::PropertySystem::getPropertyCount());
 
     // Configure WiFiManager
     wifiManager.setAPCredentials("LED-Setup", "");  // Open AP for setup
@@ -41,7 +34,6 @@ void setup() {
     wifiManager.credentials().addNetwork("Citadel", "kekovino4ka", 100);  // Default network
 
     // Register app routes BEFORE wifiManager.begin() so they're available
-    // Note: "/" has priority 0, captive portal uses priority 100 to override in AP mode
     httpDispatcher.onGet("/", [](HttpRequest& req) {
         return HttpResponse::html(index_htm, index_htm_len);
     });
@@ -52,6 +44,18 @@ void setup() {
 
     httpDispatcher.onPost("/echo", [](HttpRequest& req) {
         return HttpResponse::json(req.body().toString());
+    });
+
+    // MicroProto demo page
+    httpDispatcher.onGet("/proto", [](HttpRequest& req) {
+        return HttpResponse::html(proto_htm, proto_htm_len);
+    });
+
+    httpDispatcher.onGet("/js/proto.js", [](HttpRequest& req) {
+        return HttpResponse()
+            .status(200)
+            .contentType("application/javascript")
+            .body(microproto_client_js, microproto_client_js_len);
     });
 
     // Start WiFiManager (registers /wifiman routes, handles WiFi connection)
@@ -67,9 +71,9 @@ void setup() {
     http.begin();
     Serial.println("HTTP server on port 80");
 
-    webSocket.begin();
-    webSocket.onEvent(webSocketEvent);
-    Serial.println("WebSocket on port 81");
+    // Start MicroProto binary WebSocket server
+    protoServer.begin();
+    Serial.println("MicroProto server on port 81");
 
     Serial.printf("Registered %d routes\n", httpDispatcher.routeCount());
     Serial.println("=== Ready ===");
@@ -77,16 +81,21 @@ void setup() {
 
 void loop() {
     wifiManager.loop();
-    webSocket.loop();
+    protoServer.loop();
     http.loop();
+    MicroProto::PropertySystem::loop();
 
     static uint32_t last = 0;
     if (millis() - last > 10000) {
         last = millis();
-        Serial.printf("Free heap: %lu, RSSI: %d dBm, WS clients: %u, WiFi: %s\n",
+        Serial.printf("Free heap: %lu, RSSI: %d dBm, Proto clients: %u, WiFi: %s\n",
                       ESP.getFreeHeap(), WiFi.RSSI(),
-                      webSocket.connectedClients(),
+                      protoServer.connectedClients(),
                       wifiManager.getStateString().c_str());
+
+        // Demo: toggle brightness periodically
+        ledBrightness = (ledBrightness + 32) % 256;
+        Serial.printf("Brightness now: %d\n", (uint8_t)ledBrightness);
     }
 }
 

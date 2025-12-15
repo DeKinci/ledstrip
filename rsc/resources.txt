@@ -5,3 +5,5 @@
 
 index.htm original
 ble.htm original
+microproto-client.js original
+proto.htm original

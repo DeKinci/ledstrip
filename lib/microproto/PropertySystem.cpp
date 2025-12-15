@@ -9,22 +9,24 @@ namespace MicroProto {
 static const char* TAG = "PropertySystem";
 
 // Static member initialization
-uint32_t PropertySystem::lastChangeTime[MAX_PROPERTIES] = {0};
-bool PropertySystem::dirty[MAX_PROPERTIES] = {false};
-uint8_t PropertySystem::numProperties = 0;
+DirtySet PropertySystem::_dirty;
+DirtySet PropertySystem::_persistDirty;
+uint32_t PropertySystem::_lastPersistTime[MAX_PROPERTIES] = {0};
+uint8_t PropertySystem::_numProperties = 0;
+std::array<PropertySystem::FlushCallback, MICROPROTO_MAX_FLUSH_CALLBACKS> PropertySystem::_flushCallbacks;
 
 void PropertySystem::init() {
     LOG_DEBUG(TAG, "Starting init...");
 
     // Count registered properties
-    numProperties = 0;
+    _numProperties = 0;
     LOG_DEBUG(TAG, "Counting properties...");
     for (PropertyBase* prop = PropertyBase::head; prop; prop = prop->next) {
-        LOG_DEBUG(TAG, "  Property %d: %s (persistent=%d)", numProperties, prop->name, prop->persistent);
-        numProperties++;
+        LOG_DEBUG(TAG, "  Property %d: %s (persistent=%d)", _numProperties, prop->name, prop->persistent);
+        _numProperties++;
     }
 
-    LOG_INFO(TAG, "Initialized with %d properties", numProperties);
+    LOG_INFO(TAG, "Initialized with %d properties", _numProperties);
 
     // Load persistent properties from NVS
     LOG_DEBUG(TAG, "Loading from storage...");
@@ -33,13 +35,29 @@ void PropertySystem::init() {
 }
 
 void PropertySystem::loop() {
-    uint32_t now = millis();
+    // Notify all flush callbacks if anything is dirty
+    if (_dirty.any()) {
+        for (auto& cb : _flushCallbacks) {
+            if (cb) {
+                cb(_dirty);
+            }
+        }
+        _dirty.clearAll();
+    }
 
-    // Check for properties that need flushing
-    for (uint8_t i = 0; i < numProperties; i++) {
-        if (dirty[i] && (now - lastChangeTime[i]) >= DEBOUNCE_MS) {
-            flushProperty(i);
-            dirty[i] = false;
+    // Handle persistence with debouncing
+    uint32_t now = millis();
+    for (uint8_t i = 0; i < _numProperties; i++) {
+        if (_persistDirty.test(i) && (now - _lastPersistTime[i]) >= PERSIST_DEBOUNCE_MS) {
+            // Find and save property
+            for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
+                if (p->id == i && p->persistent) {
+                    PropertyStorage::save(p);
+                    LOG_DEBUG(TAG, "Persisted property %d (%s)", p->id, p->name);
+                    break;
+                }
+            }
+            _persistDirty.clear(i);
         }
     }
 }
@@ -47,47 +65,12 @@ void PropertySystem::loop() {
 void PropertySystem::markDirty(uint8_t property_id, bool persistent) {
     if (property_id >= MAX_PROPERTIES) return;
 
-    dirty[property_id] = true;
-    lastChangeTime[property_id] = millis();
-}
+    _dirty.set(property_id);
 
-void PropertySystem::flush(uint8_t property_id) {
-    if (property_id >= numProperties) return;
-
-    flushProperty(property_id);
-    dirty[property_id] = false;
-}
-
-void PropertySystem::flushAll() {
-    for (uint8_t i = 0; i < numProperties; i++) {
-        if (dirty[i]) {
-            flushProperty(i);
-            dirty[i] = false;
-        }
+    if (persistent) {
+        _persistDirty.set(property_id);
+        _lastPersistTime[property_id] = millis();
     }
-}
-
-void PropertySystem::flushProperty(uint8_t property_id) {
-    // Find property by id
-    PropertyBase* prop = nullptr;
-    for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
-        if (p->id == property_id) {
-            prop = p;
-            break;
-        }
-    }
-
-    if (!prop) return;
-
-    // Save to NVS if persistent
-    if (prop->persistent) {
-        PropertyStorage::save(prop);
-    }
-
-    // TODO: Broadcast to WebSocket clients
-    // TODO: Broadcast to mesh if GROUP/GLOBAL
-
-    LOG_DEBUG(TAG, "Flushed property %d (%s)", prop->id, prop->name);
 }
 
 void PropertySystem::loadFromStorage() {
@@ -112,7 +95,25 @@ void PropertySystem::saveToStorage() {
 }
 
 uint8_t PropertySystem::getPropertyCount() {
-    return numProperties;
+    return _numProperties;
+}
+
+int8_t PropertySystem::onFlush(FlushCallback callback) {
+    if (!callback) return -1;
+
+    for (size_t i = 0; i < _flushCallbacks.size(); i++) {
+        if (!_flushCallbacks[i]) {
+            _flushCallbacks[i] = callback;
+            return static_cast<int8_t>(i);
+        }
+    }
+    return -1;
+}
+
+void PropertySystem::removeFlushCallback(int8_t slot) {
+    if (slot >= 0 && static_cast<size_t>(slot) < _flushCallbacks.size()) {
+        _flushCallbacks[slot] = FlushCallback{};
+    }
 }
 
 } // namespace MicroProto

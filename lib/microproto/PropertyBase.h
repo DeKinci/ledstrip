@@ -3,8 +3,11 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <MicroFunction.h>
 
 namespace MicroProto {
+
+using microcore::MicroFunction;
 
 enum class PropertyLevel : uint8_t {
     LOCAL = 0,
@@ -43,16 +46,22 @@ public:
     virtual const void* getData() const = 0;
     virtual void setData(const void* data, size_t size) = 0;
 
-    // Change callback - called immediately on value change
-    using ChangeCallback = void (*)(uint8_t property_id);
-    void setChangeCallback(ChangeCallback callback) { changeCallback = callback; }
+    // Per-property change callback - called immediately on value change
+    // Simple function pointer (no captures needed for app-level reactions)
+    using ChangeCallback = MicroFunction<void(), 0>;
+
+    // Set the change callback (replaces any existing)
+    void onChange(ChangeCallback callback) { _onChange = callback; }
+
+    // Clear the change callback
+    void clearOnChange() { _onChange.clear(); }
 
 protected:
     void notifyChange();
 
 private:
     static uint8_t nextId;
-    ChangeCallback changeCallback = nullptr;
+    ChangeCallback _onChange;
 };
 
 } // namespace MicroProto

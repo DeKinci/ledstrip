@@ -2,7 +2,6 @@
 #include "HttpDispatcher.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
-#include "HttpStatus.h"
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -223,36 +222,26 @@ void test_dispatcher_off_invalid_handle() {
 }
 
 // ============================================================================
-// String and Code Handlers
+// Void Handler (returns 200 OK)
 // ============================================================================
 
-void test_dispatcher_string_handler() {
-    HttpDispatcher dispatcher;
+static bool voidHandlerCalled = false;
 
-    dispatcher.onGet("/hello", [](HttpRequest& req) -> String {
-        return "Hello, World!";
+void test_dispatcher_void_handler() {
+    HttpDispatcher dispatcher;
+    voidHandlerCalled = false;
+
+    dispatcher.onPost("/action", [](HttpRequest& req) {
+        voidHandlerCalled = true;
+        // No return - void handler returns 200 OK automatically
     });
 
     HttpRequest req;
-    makeRequest(req, "GET", "/hello");
+    makeRequest(req, "POST", "/action");
     HttpResponse res = dispatcher.dispatch(req);
 
+    TEST_ASSERT_TRUE(voidHandlerCalled);
     TEST_ASSERT_EQUAL(200, res.statusCode());
-    TEST_ASSERT_EQUAL_STRING("Hello, World!", res.bodyString().c_str());
-}
-
-void test_dispatcher_code_handler() {
-    HttpDispatcher dispatcher;
-
-    dispatcher.onPost("/upload", [](HttpRequest& req) -> HttpStatus {
-        return HttpStatus::Created;
-    });
-
-    HttpRequest req;
-    makeRequest(req, "POST", "/upload");
-    HttpResponse res = dispatcher.dispatch(req);
-
-    TEST_ASSERT_EQUAL(201, res.statusCode());
 }
 
 // ============================================================================
@@ -489,9 +478,8 @@ int main(int argc, char **argv) {
     RUN_TEST(test_dispatcher_off_by_pattern);
     RUN_TEST(test_dispatcher_off_invalid_handle);
 
-    // Handler types
-    RUN_TEST(test_dispatcher_string_handler);
-    RUN_TEST(test_dispatcher_code_handler);
+    // Void handler
+    RUN_TEST(test_dispatcher_void_handler);
 
     // Custom handlers
     RUN_TEST(test_dispatcher_custom_not_found);

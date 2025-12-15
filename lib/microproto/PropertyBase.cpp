@@ -30,12 +30,12 @@ PropertyBase::PropertyBase(
 }
 
 void PropertyBase::notifyChange() {
-    // Immediate callback
-    if (changeCallback) {
-        changeCallback(id);
+    // Call per-property callback immediately
+    if (_onChange) {
+        _onChange();
     }
 
-    // Mark dirty for debounced save/broadcast
+    // Mark dirty for system-level processing (broadcast, persist, etc.)
     PropertySystem::markDirty(id, persistent);
 }
 

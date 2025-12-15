@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-ESP32 Integration Test Suite
+ESP32 Integration Test Runner
 
 Auto-discovers ESP32 device via ARP and runs a full test suite.
 
 Usage:
-    python scripts/integration_test.py              # Auto-discover and run all
-    python scripts/integration_test.py 192.168.1.100  # Use specific IP
-    pio run -t test_device                          # Via PlatformIO
+    python scripts/run_integration_tests.py              # Auto-discover and run all
+    python scripts/run_integration_tests.py 192.168.1.100  # Use specific IP
+    pio run -t test_device                               # Via PlatformIO
 """
 
 import subprocess
@@ -16,19 +16,25 @@ import statistics
 from pathlib import Path
 from typing import List
 
-# Ensure we can import from tests subpackage
-sys.path.insert(0, str(Path(__file__).parent))
+# Ensure we can import from test/integration
+sys.path.insert(0, str(Path(__file__).parent.parent / 'test'))
 
-from tests import Colors, TestResult, discover_esp32
-from tests.test_http import test_http_reliability, test_http_post
-from tests.test_websocket import test_websocket_reliability
-from tests.test_parallel import test_parallel
-from tests.test_wifiman import (
+from integration import Colors, TestResult, discover_esp32
+from integration.test_http import test_http_reliability, test_http_post
+from integration.test_websocket import test_websocket_reliability
+from integration.test_parallel import test_parallel
+from integration.test_wifiman import (
     test_wifiman_status,
     test_wifiman_list,
     test_wifiman_scan,
     test_wifiman_page,
     test_wifiman_add_remove,
+)
+from integration.test_microproto import (
+    test_microproto,
+    test_microproto_stress,
+    test_microproto_reconnect,
+    test_microproto_ping,
 )
 
 
@@ -52,6 +58,12 @@ def run_test_suite(ip: str) -> List[TestResult]:
     results.append(test_wifiman_scan(ip))
     results.append(test_wifiman_page(ip))
     results.append(test_wifiman_add_remove(ip))
+
+    # MicroProto Tests
+    results.append(test_microproto(ip))
+    results.append(test_microproto_ping(ip, count=10))
+    results.append(test_microproto_stress(ip, duration=5))
+    results.append(test_microproto_reconnect(ip, count=5))
 
     return results
 
@@ -126,7 +138,7 @@ def main():
         ip = discover_esp32()
         if not ip:
             print(f"\n{Colors.RED}Cannot run tests without device IP{Colors.RESET}")
-            print("Usage: python scripts/integration_test.py [IP_ADDRESS]")
+            print("Usage: python scripts/run_integration_tests.py [IP_ADDRESS]")
             sys.exit(1)
 
     # Connectivity check

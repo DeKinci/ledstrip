@@ -16,6 +16,7 @@ class HttpResponse {
     HttpResponse& body(const uint8_t* data, size_t len);  // Non-owning, data must outlive response
 
     // Convenience builders
+    static HttpResponse ok() { return withStatus(200); }
     static HttpResponse text(const String& content, int code = 200);
     static HttpResponse json(const String& content, int code = 200);
     static HttpResponse html(const String& content, int code = 200);

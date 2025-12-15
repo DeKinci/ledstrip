@@ -4,6 +4,58 @@
 
 ESP32-based LED strip controller with web interface and WebSocket communication.
 
+## Coding Conventions
+
+### Memory & Allocation
+
+Avoid heap allocations where possible. Prefer stack and static allocation:
+
+- **Fixed-size arrays**: Use `std::array<T, N>` instead of C-style `T arr[N]`
+- **Function callbacks**: Use `MicroFunction<Signature, CaptureSize>` instead of `std::function`
+- **Strings**: Prefer `const char*` for static strings, `String` only when dynamic content needed
+- **Containers**: Avoid `std::vector` in hot paths; use fixed-size `std::array` when size is known
+
+```cpp
+// Good
+std::array<bool, 4> _clientReady = {};
+MicroFunction<void(const DirtySet&), 8> callback;
+
+// Avoid
+bool _clientReady[4];           // Use std::array
+std::function<void()> callback; // Heap allocates captures
+```
+
+### MicroFunction
+
+Lightweight callable wrapper from `lib/MicroCore/MicroFunction.h`:
+
+```cpp
+// Zero-capture (function pointer only, 4 bytes)
+MicroFunction<void(), 0> simple_cb;
+
+// Small captures (e.g., `this` pointer, 8 bytes)
+MicroFunction<void(int), 8> with_capture;
+
+// Compile-time error if lambda captures exceed specified size
+```
+
+### Constants
+
+- Use `static constexpr` for class constants
+- Use `#define` for configurable limits that users may override
+
+```cpp
+// In header
+#ifndef MYLIB_MAX_ITEMS
+#define MYLIB_MAX_ITEMS 8
+#endif
+
+class MyClass {
+    static constexpr uint32_t TIMEOUT_MS = 1000;
+    std::array<Item, MYLIB_MAX_ITEMS> _items;
+};
+```
+
 ## Current Architecture
 
 Migrated from AsyncWebServer (poor performance) to **minimal synchronous WiFiServer + WebSockets**:
@@ -125,20 +177,41 @@ curl -w "\nStatus: %{http_code}\n" http://<IP>/notfound
 curl -X POST -H "Content-Type: application/json" -d '{"name":"test"}' http://<IP>/api/shader
 ```
 
-### Integration Test Suite
-
-Auto-discovers ESP32 via ARP and runs HTTP/WebSocket tests. Located in `scripts/tests/`.
+### Test Structure
 
 ```
+test/
+├── js/                      # JavaScript unit tests
+│   └── microproto-client.test.js
+├── integration/             # Python integration tests (run against device)
+│   ├── __init__.py          # Shared: Colors, TestResult, discover_esp32
+│   ├── test_http.py         # HTTP reliability + POST echo
+│   ├── test_websocket.py    # WebSocket reliability
+│   ├── test_parallel.py     # Parallel HTTP + WS stress test
+│   ├── test_microproto.py   # MicroProto WebSocket protocol
+│   └── test_wifiman.py      # WiFi management API
+├── native/                  # Native C++ tests (run on laptop)
+│   ├── mocks/               # Mock Arduino/ArduinoJson for native builds
+│   ├── test_dispatcher/
+│   ├── test_http/
+│   ├── test_messages/
+│   ├── test_microfunction/
+│   └── test_wire/
+└── onboard/                 # Tests that run on ESP32 device
+    ├── test_http_request/
+    ├── test_property_basic/
+    ├── test_property_callbacks/
+    ├── test_property_storage/
+    └── test_property_system/
+
 scripts/
-├── integration_test.py      # Main runner
-├── pio_integration.py       # PlatformIO hook
-└── tests/
-    ├── __init__.py          # Shared: Colors, TestResult, discover_esp32
-    ├── test_http.py         # HTTP reliability + POST echo
-    ├── test_websocket.py    # WebSocket reliability
-    └── test_parallel.py     # Parallel HTTP + WS stress test
+├── run_integration_tests.py  # Integration test runner
+└── pio_integration.py        # PlatformIO hook for `pio run -t test_device`
 ```
+
+### Integration Tests (Python)
+
+Auto-discovers ESP32 via ARP and runs HTTP/WebSocket/MicroProto tests.
 
 #### Setup
 
@@ -154,26 +227,18 @@ python3 -m venv .venv
 
 ```bash
 # Run all integration tests (auto-discovers device)
-python scripts/integration_test.py
+python scripts/run_integration_tests.py
 
 # Run with specific IP
-python scripts/integration_test.py 192.168.1.100
+python scripts/run_integration_tests.py 192.168.1.100
 
 # Run via PlatformIO
 pio run -t test_device
 ```
 
-#### What Each Test Does
-
-| Test | Description |
-|------|-------------|
-| `test_http.py` | HTTP /ping reliability (15 requests) + POST /echo validation |
-| `test_websocket.py` | WebSocket message round-trips (15 messages) |
-| `test_parallel.py` | HTTP + WebSocket simultaneously for 5 seconds |
-
 #### Adding New Integration Tests
 
-1. Create `scripts/tests/test_myfeature.py`:
+1. Create `test/integration/test_myfeature.py`:
 
 ```python
 from . import Colors, TestResult
@@ -189,10 +254,10 @@ def test_my_feature(ip: str) -> TestResult:
     return result
 ```
 
-2. Import and add to `scripts/integration_test.py`:
+2. Import and add to `scripts/run_integration_tests.py`:
 
 ```python
-from tests.test_myfeature import test_my_feature
+from integration.test_myfeature import test_my_feature
 
 def run_test_suite(ip: str) -> List[TestResult]:
     results = []
@@ -201,19 +266,29 @@ def run_test_suite(ip: str) -> List[TestResult]:
     return results
 ```
 
-### Native Unit Tests (run on laptop)
+### Native Unit Tests (C++)
 
-Tests for HttpRequest and other webutils that run locally without hardware:
+Tests for webutils, MicroProto wire format, MicroCore, etc. Run locally without hardware.
 
 ```bash
 # Run all native tests
 pio test -e native
 
+# Run specific test
+pio test -e native -f native/test_microfunction
+
 # Run with verbose output
 pio test -e native -v
 ```
 
-Tests are in `test/test_native_http/`. Uses mock Arduino.h from `test/native_mocks/Arduino/`.
+### JavaScript Unit Tests
+
+Tests for MicroProto JS client using MockWebSocket.
+
+```bash
+# Run from project root
+node test/js/microproto-client.test.js
+```
 
 ### Build & Upload
 

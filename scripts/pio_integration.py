@@ -16,7 +16,7 @@ def run_integration_tests(source, target, env):
     """Run integration tests on the device."""
     project_dir = Path(env.get("PROJECT_DIR", "."))
     venv_python = project_dir / ".venv" / "bin" / "python"
-    test_script = project_dir / "scripts" / "integration_test.py"
+    test_script = project_dir / "scripts" / "run_integration_tests.py"
 
     print("\n" + "=" * 60)
     print("Running Integration Tests")

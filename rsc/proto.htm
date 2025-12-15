@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroProto Demo</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@3.9.2/dist/full.css" rel="stylesheet" type="text/css" />
+</head>
+<body class="min-h-screen bg-base-200 p-4">
+    <div class="max-w-md mx-auto">
+        <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+                <h2 class="card-title">
+                    MicroProto Demo
+                    <span id="status" class="badge badge-error">Disconnected</span>
+                </h2>
+
+                <div id="properties" class="space-y-4 mt-4">
+                    <!-- Properties will be populated here -->
+                </div>
+
+                <div class="divider"></div>
+
+                <div class="text-xs opacity-60">
+                    <div>Session: <span id="session">-</span></div>
+                    <div>Properties: <span id="propCount">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card bg-base-100 shadow-xl mt-4">
+            <div class="card-body">
+                <h3 class="font-bold">Event Log</h3>
+                <div id="log" class="text-xs font-mono bg-base-200 p-2 rounded max-h-48 overflow-y-auto">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/proto.js"></script>
+    <script>
+        const log = document.getElementById('log');
+        const status = document.getElementById('status');
+        const session = document.getElementById('session');
+        const propCount = document.getElementById('propCount');
+        const propsContainer = document.getElementById('properties');
+
+        function addLog(msg) {
+            const time = new Date().toLocaleTimeString();
+            log.innerHTML += `<div>[${time}] ${msg}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // Create MicroProto client
+        const client = new MicroProtoClient(`ws://${location.hostname}:81`, {
+            debug: true,
+            reconnectDelay: 3000
+        });
+
+        // Connection events
+        client.on('connect', (info) => {
+            status.className = 'badge badge-success';
+            status.textContent = 'Connected';
+            session.textContent = info.sessionId;
+            addLog(`Connected (session ${info.sessionId})`);
+        });
+
+        client.on('disconnect', () => {
+            status.className = 'badge badge-error';
+            status.textContent = 'Disconnected';
+            addLog('Disconnected');
+        });
+
+        client.on('error', (err) => {
+            addLog(`Error: ${err.message || err}`);
+        });
+
+        // Schema event - when a property is defined
+        client.on('schema', (prop) => {
+            addLog(`Schema: ${prop.name} (id=${prop.id}, type=${prop.typeId})`);
+        });
+
+        // Ready event - all initial values received
+        client.on('ready', (props) => {
+            propCount.textContent = Object.keys(props).length;
+            addLog(`Ready with ${Object.keys(props).length} properties`);
+            renderProperties(props);
+        });
+
+        // Property update event
+        client.on('property', (id, name, value, oldValue) => {
+            addLog(`Update: ${name} = ${value}`);
+            updatePropertyUI(name, value);
+        });
+
+        function renderProperties(props) {
+            propsContainer.innerHTML = '';
+
+            for (const [name, info] of Object.entries(props)) {
+                const div = document.createElement('div');
+                div.className = 'form-control';
+                div.id = `prop-${name}`;
+
+                if (info.type === 0x01) { // BOOL
+                    div.innerHTML = `
+                        <label class="label cursor-pointer">
+                            <span class="label-text">${name}</span>
+                            <input type="checkbox" class="toggle toggle-primary"
+                                   ${info.value ? 'checked' : ''}
+                                   ${info.readonly ? 'disabled' : ''}
+                                   onchange="client.setProperty('${name}', this.checked)">
+                        </label>
+                    `;
+                } else if (info.type === 0x03) { // UINT8
+                    div.innerHTML = `
+                        <label class="label">
+                            <span class="label-text">${name}</span>
+                            <span class="label-text-alt" id="val-${name}">${info.value}</span>
+                        </label>
+                        <input type="range" min="0" max="255" value="${info.value}"
+                               class="range range-primary range-sm"
+                               ${info.readonly ? 'disabled' : ''}
+                               oninput="document.getElementById('val-${name}').textContent = this.value"
+                               onchange="client.setProperty('${name}', parseInt(this.value))">
+                    `;
+                } else if (info.type === 0x05) { // FLOAT32
+                    div.innerHTML = `
+                        <label class="label">
+                            <span class="label-text">${name}</span>
+                            <span class="label-text-alt" id="val-${name}">${info.value.toFixed(2)}</span>
+                        </label>
+                        <input type="range" min="0" max="10" step="0.1" value="${info.value}"
+                               class="range range-primary range-sm"
+                               ${info.readonly ? 'disabled' : ''}
+                               oninput="document.getElementById('val-${name}').textContent = parseFloat(this.value).toFixed(2)"
+                               onchange="client.setProperty('${name}', parseFloat(this.value))">
+                    `;
+                } else {
+                    div.innerHTML = `
+                        <label class="label">
+                            <span class="label-text">${name}</span>
+                            <span class="label-text-alt">${info.value} (type ${info.type})</span>
+                        </label>
+                    `;
+                }
+
+                propsContainer.appendChild(div);
+            }
+        }
+
+        function updatePropertyUI(name, value) {
+            const prop = client.properties.get(client.propertyByName.get(name));
+            if (!prop) return;
+
+            if (prop.typeId === 0x01) { // BOOL
+                const input = document.querySelector(`#prop-${name} input`);
+                if (input) input.checked = value;
+            } else if (prop.typeId === 0x03) { // UINT8
+                const input = document.querySelector(`#prop-${name} input[type="range"]`);
+                const label = document.getElementById(`val-${name}`);
+                if (input) input.value = value;
+                if (label) label.textContent = value;
+            } else if (prop.typeId === 0x05) { // FLOAT32
+                const input = document.querySelector(`#prop-${name} input[type="range"]`);
+                const label = document.getElementById(`val-${name}`);
+                if (input) input.value = value;
+                if (label) label.textContent = value.toFixed(2);
+            }
+        }
+
+        // Connect on page load
+        addLog('Connecting...');
+        client.connect();
+    </script>
+</body>
+</html>
