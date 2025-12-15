@@ -1,22 +1,18 @@
 #include "WiFiMan.h"
 #include "WiFiManWebUI.h"
-#include <ArduinoJson.h>
-#include <AsyncJson.h>
 
 namespace WiFiMan {
 
-void WiFiManager::setupWebServer() {
-    if (!webServer) {
-        Serial.println("[WiFiMan] No web server provided, captive portal disabled");
+void WiFiManager::setupRoutes() {
+    if (!_dispatcher) {
+        Serial.println("[WiFiMan] No dispatcher provided, web interface disabled");
         return;
     }
 
-    Serial.println("[WiFiMan] Setting up WiFiMan web interface");
-
-    // Register API routes FIRST (before /wifiman page route to avoid prefix matching)
+    Serial.println("[WiFiMan] Setting up WiFiMan web routes");
 
     // API: Scan networks
-    webServer->on("/wifiman/scan", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    _dispatcher->onGet("/wifiman/scan", [this](HttpRequest& req) -> HttpResponse {
         Serial.println("[WiFiMan] Scan endpoint called");
         JsonDocument doc;
         JsonArray networks = doc["networks"].to<JsonArray>();
@@ -44,14 +40,11 @@ void WiFiManager::setupWebServer() {
             doc["status"] = "scanning";
         }
 
-        String response;
-        serializeJson(doc, response);
-        Serial.printf("[WiFiMan] Sending response: %s\n", response.c_str());
-        request->send(200, "application/json", response);
+        return HttpResponse::json(doc);
     });
 
     // API: List saved networks
-    webServer->on("/wifiman/list", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    _dispatcher->onGet("/wifiman/list", [this](HttpRequest& req) -> HttpResponse {
         Serial.println("[WiFiMan] List endpoint called");
         JsonDocument doc;
         JsonArray networks = doc["networks"].to<JsonArray>();
@@ -67,136 +60,151 @@ void WiFiManager::setupWebServer() {
             net["lastConnected"] = cred.lastConnected;
         }
 
-        String response;
-        serializeJson(doc, response);
-        Serial.printf("[WiFiMan] Sending response: %s\n", response.c_str());
-        request->send(200, "application/json", response);
+        return HttpResponse::json(doc);
     });
 
     // API: Status
-    webServer->on("/wifiman/status", HTTP_GET, [this](AsyncWebServerRequest *request) {
+    _dispatcher->onGet("/wifiman/status", [this](HttpRequest& req) -> HttpResponse {
         JsonDocument doc;
         doc["state"] = getStateString();
         doc["connected"] = isConnected();
         doc["ssid"] = getCurrentSSID();
         doc["ip"] = getIP().toString();
         doc["apMode"] = isAPMode();
+        String err = getLastError();
+        if (err.length() > 0) {
+            doc["error"] = err;
+        }
 
-        String response;
-        serializeJson(doc, response);
-        request->send(200, "application/json", response);
+        return HttpResponse::json(doc);
+    });
+
+    // API: Add network
+    _dispatcher->onPost("/wifiman/add", [this](HttpRequest& req) -> HttpResponse {
+        JsonDocument doc;
+        if (!req.json(doc)) {
+            return HttpResponse::json("{\"error\":\"Invalid JSON\"}", 400);
+        }
+
+        if (!doc.containsKey("ssid")) {
+            return HttpResponse::json("{\"error\":\"SSID required\"}", 400);
+        }
+
+        String ssid = doc["ssid"].as<String>();
+        String password = doc["password"] | "";
+        int priority = doc["priority"] | 0;
+
+        if (creds.addNetwork(ssid, password, priority)) {
+            Serial.printf("[WiFiMan] Network added via web: %s\n", ssid.c_str());
+            return HttpResponse::json("{\"success\":true}");
+        } else {
+            return HttpResponse::json("{\"error\":\"Failed to add network\"}", 500);
+        }
+    });
+
+    // API: Remove network
+    _dispatcher->onPost("/wifiman/remove", [this](HttpRequest& req) -> HttpResponse {
+        JsonDocument doc;
+        if (!req.json(doc)) {
+            return HttpResponse::json("{\"error\":\"Invalid JSON\"}", 400);
+        }
+
+        if (!doc.containsKey("ssid")) {
+            return HttpResponse::json("{\"error\":\"SSID required\"}", 400);
+        }
+
+        String ssid = doc["ssid"].as<String>();
+
+        if (creds.removeNetwork(ssid)) {
+            Serial.printf("[WiFiMan] Network removed via web: %s\n", ssid.c_str());
+            return HttpResponse::json("{\"success\":true}");
+        } else {
+            return HttpResponse::json("{\"error\":\"Network not found\"}", 404);
+        }
     });
 
     // API: Clear all networks
-    webServer->on("/wifiman/clear", HTTP_POST, [this](AsyncWebServerRequest *request) {
+    _dispatcher->onPost("/wifiman/clear", [this](HttpRequest& req) -> HttpResponse {
         creds.clearAll();
-        request->send(200, "application/json", "{\"success\":true}");
         Serial.println("[WiFiMan] All networks cleared via web");
+        return HttpResponse::json("{\"success\":true}");
     });
 
     // API: Connect now
-    webServer->on("/wifiman/connect", HTTP_POST, [this](AsyncWebServerRequest *request) {
-        request->send(200, "application/json", "{\"success\":true}");
+    _dispatcher->onPost("/wifiman/connect", [this](HttpRequest& req) -> HttpResponse {
         Serial.println("[WiFiMan] Connection requested via web");
-
         // Set flag to trigger connection in loop (after response is sent)
         webConnectRequestTime = millis();
+        return HttpResponse::json("{\"success\":true}");
     });
 
-    // API: Add network (using AsyncCallbackJsonWebHandler)
-    AsyncCallbackJsonWebHandler* addHandler = new AsyncCallbackJsonWebHandler(
-        "/wifiman/add",
-        [this](AsyncWebServerRequest *request, JsonVariant &json) {
-            JsonObject obj = json.as<JsonObject>();
-
-            if (!obj.containsKey("ssid")) {
-                request->send(400, "application/json", "{\"error\":\"SSID required\"}");
-                return;
-            }
-
-            String ssid = obj["ssid"].as<String>();
-            String password = obj["password"] | "";
-            int priority = obj["priority"] | 0;
-
-            if (creds.addNetwork(ssid, password, priority)) {
-                request->send(200, "application/json", "{\"success\":true}");
-                Serial.printf("[WiFiMan] Network added via web: %s\n", ssid.c_str());
-            } else {
-                request->send(500, "application/json", "{\"error\":\"Failed to add network\"}");
-            }
-        }
-    );
-    webServer->addHandler(addHandler);
-
-    // API: Remove network (using AsyncCallbackJsonWebHandler)
-    AsyncCallbackJsonWebHandler* removeHandler = new AsyncCallbackJsonWebHandler(
-        "/wifiman/remove",
-        [this](AsyncWebServerRequest *request, JsonVariant &json) {
-            JsonObject obj = json.as<JsonObject>();
-
-            if (!obj.containsKey("ssid")) {
-                request->send(400, "application/json", "{\"error\":\"SSID required\"}");
-                return;
-            }
-
-            String ssid = obj["ssid"].as<String>();
-
-            if (creds.removeNetwork(ssid)) {
-                request->send(200, "application/json", "{\"success\":true}");
-                Serial.printf("[WiFiMan] Network removed via web: %s\n", ssid.c_str());
-            } else {
-                request->send(404, "application/json", "{\"error\":\"Network not found\"}");
-            }
-        }
-    );
-    webServer->addHandler(removeHandler);
-
-    // Main portal page - captive portal at / (for AP mode) and /wifiman (always available)
-    // IMPORTANT: Register this AFTER all /wifiman/* API routes to avoid prefix matching
-    webServer->on("/", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->send_P(200, "text/html", WIFIMAN_PORTAL_HTML);
+    // Permanent portal page at /wifiman (always available)
+    _dispatcher->onGet("/wifiman", [](HttpRequest& req) -> HttpResponse {
+        return HttpResponse::html((const uint8_t*)WIFIMAN_PORTAL_HTML, strlen(WIFIMAN_PORTAL_HTML));
     });
 
-    webServer->on("/wifiman", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->send_P(200, "text/html", WIFIMAN_PORTAL_HTML);
-    });
-
-    // Captive portal detection endpoints
-    // Android
-    webServer->on("/generate_204", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    webServer->on("/gen_204", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    // iOS/macOS
-    webServer->on("/hotspot-detect.html", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    // Windows
-    webServer->on("/connecttest.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    webServer->on("/ncsi.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    // Additional Android endpoints
-    webServer->on("/mobile/status.php", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    webServer->on("/canonical.html", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-    webServer->on("/success.txt", HTTP_GET, [this](AsyncWebServerRequest *request) {
-        request->redirect("/");
-    });
-
-    Serial.println("[WiFiMan] Web interface ready at / and /wifiman");
+    Serial.println("[WiFiMan] Web routes ready at /wifiman");
 }
 
-void WiFiManager::teardownWebServer() {
-    // Web routes stay active - available at http://device-ip/wifiman when connected
-    Serial.println("[WiFiMan] Web interface remains available for reconfiguration");
+void WiFiManager::setupCaptivePortal() {
+    if (!_dispatcher) return;
+
+    Serial.println("[WiFiMan] Setting up captive portal routes");
+
+    // High-priority route for / that serves portal in AP mode
+    // Priority 100 ensures this takes precedence over normal "/" route
+    _captiveRootHandle = _dispatcher->onGet("/", [](HttpRequest& req) -> HttpResponse {
+        return HttpResponse::html((const uint8_t*)WIFIMAN_PORTAL_HTML, strlen(WIFIMAN_PORTAL_HTML));
+    }, 100);
+
+    _captiveDetectCount = 0;
+
+    // Helper for redirect response
+    auto redirect = [](HttpRequest& req) -> HttpResponse {
+        return HttpResponse().status(302).header("Location", "/").body("");
+    };
+
+    // Captive portal detection endpoints - all redirect to portal
+    // Android
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/generate_204", redirect, 100);
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/gen_204", redirect, 100);
+
+    // iOS/macOS
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/hotspot-detect.html", redirect, 100);
+
+    // Windows
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/connecttest.txt", redirect, 100);
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/ncsi.txt", redirect, 100);
+
+    // Additional Android endpoints
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/mobile/status.php", redirect, 100);
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/canonical.html", redirect, 100);
+    _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/success.txt", redirect, 100);
+
+    Serial.printf("[WiFiMan] Captive portal ready with %d detection endpoints\n", _captiveDetectCount + 1);
+}
+
+void WiFiManager::teardownCaptivePortal() {
+    if (!_dispatcher) return;
+
+    Serial.println("[WiFiMan] Removing captive portal routes");
+
+    // Remove root captive portal
+    if (_captiveRootHandle.valid()) {
+        _dispatcher->off(_captiveRootHandle);
+        _captiveRootHandle = HttpDispatcher::RouteHandle::invalid();
+    }
+
+    // Remove detection endpoints
+    for (int i = 0; i < _captiveDetectCount; i++) {
+        if (_captiveDetectHandles[i].valid()) {
+            _dispatcher->off(_captiveDetectHandles[i]);
+            _captiveDetectHandles[i] = HttpDispatcher::RouteHandle::invalid();
+        }
+    }
+    _captiveDetectCount = 0;
+
+    Serial.println("[WiFiMan] Captive portal removed, /wifiman still available");
 }
 
 } // namespace WiFiMan

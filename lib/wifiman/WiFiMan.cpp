@@ -4,8 +4,8 @@ namespace WiFiMan {
 
 WiFiManager* WiFiManager::instance = nullptr;
 
-WiFiManager::WiFiManager(AsyncWebServer* server)
-    : webServer(server),
+WiFiManager::WiFiManager(HttpDispatcher* dispatcher)
+    : _dispatcher(dispatcher),
       dnsServer(nullptr),
       state(State::IDLE),
       apSSID("ESP32-Setup"),
@@ -19,7 +19,9 @@ WiFiManager::WiFiManager(AsyncWebServer* server)
       apStartTime(0),
       webConnectRequestTime(0),
       currentNetworkIndex(-1),
-      consecutiveFailures(0) {
+      consecutiveFailures(0),
+      _captiveRootHandle(HttpDispatcher::RouteHandle::invalid()),
+      _captiveDetectCount(0) {
 
     instance = this;
     creds.load();
@@ -58,15 +60,15 @@ void WiFiManager::begin() {
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(hostname.c_str());
 
-    // Register WiFi event handler
-    WiFi.onEvent([](WiFiEvent_t event) {
+    // Register WiFi event handler with info for disconnect reason
+    WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info) {
         if (instance) {
-            instance->handleWiFiEvent(event);
+            instance->handleWiFiEvent(event, info);
         }
     });
 
-    // Setup web UI routes (available in both AP and STA modes)
-    setupWebServer();
+    // Setup permanent web routes at /wifiman (available in both AP and STA modes)
+    setupRoutes();
 
     if (creds.getAll().empty()) {
         Serial.println("[WiFiMan] No credentials stored, starting AP mode");
@@ -89,7 +91,10 @@ void WiFiManager::startAP() {
 void WiFiManager::stopAP() {
     if (state == State::AP_MODE) {
         WiFi.softAPdisconnect(true);
-        teardownWebServer();
+        teardownCaptivePortal();
+        if (dnsServer) {
+            dnsServer->stop();
+        }
         transitionToState(State::IDLE);
     }
 }
@@ -410,7 +415,9 @@ void WiFiManager::transitionToState(State newState) {
             }
             dnsServer->start(53, "*", WiFi.softAPIP());
 
-            // Web routes already setup in begin()
+            // Setup captive portal routes (high priority "/" override)
+            setupCaptivePortal();
+
             apStartTime = millis();
 
             if (apStartedCallback) {
@@ -446,19 +453,71 @@ void WiFiManager::updateAPClients() {
     }
 }
 
-void WiFiManager::handleWiFiEvent(WiFiEvent_t event) {
+void WiFiManager::handleWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     switch (event) {
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
             Serial.println("[WiFiMan] WiFi connected event");
+            _lastError = "";  // Clear error on successful connection
             break;
-        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
-            Serial.println("[WiFiMan] WiFi disconnected event");
+        case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: {
+            uint8_t reason = info.wifi_sta_disconnected.reason;
+            _lastError = reasonToString(reason);
+            Serial.printf("[WiFiMan] WiFi disconnected, reason: %s (%d)\n", _lastError.c_str(), reason);
             break;
+        }
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
             Serial.println("[WiFiMan] Got IP event");
+            _lastError = "";  // Clear error on getting IP
             break;
         default:
             break;
+    }
+}
+
+String WiFiManager::reasonToString(uint8_t reason) {
+    // User-friendly messages for common errors
+    switch (reason) {
+        case WIFI_REASON_AUTH_FAIL:
+        case WIFI_REASON_AUTH_EXPIRE:
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:
+        case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+        case WIFI_REASON_MIC_FAILURE:
+            return "Wrong password";
+
+        case WIFI_REASON_NO_AP_FOUND:
+            return "Network not found";
+
+        case WIFI_REASON_ASSOC_TOOMANY:
+            return "Too many clients";
+
+        case WIFI_REASON_BEACON_TIMEOUT:
+        case WIFI_REASON_AP_TSF_RESET:
+            return "Connection lost";
+
+        // For other reasons, just show the code name
+        case WIFI_REASON_UNSPECIFIED: return "UNSPECIFIED";
+        case WIFI_REASON_ASSOC_EXPIRE: return "ASSOC_EXPIRE";
+        case WIFI_REASON_ASSOC_LEAVE: return "ASSOC_LEAVE";
+        case WIFI_REASON_ASSOC_NOT_AUTHED: return "ASSOC_NOT_AUTHED";
+        case WIFI_REASON_DISASSOC_PWRCAP_BAD: return "DISASSOC_PWRCAP_BAD";
+        case WIFI_REASON_DISASSOC_SUPCHAN_BAD: return "DISASSOC_SUPCHAN_BAD";
+        case WIFI_REASON_IE_INVALID: return "IE_INVALID";
+        case WIFI_REASON_GROUP_KEY_UPDATE_TIMEOUT: return "GROUP_KEY_TIMEOUT";
+        case WIFI_REASON_IE_IN_4WAY_DIFFERS: return "IE_IN_4WAY_DIFFERS";
+        case WIFI_REASON_GROUP_CIPHER_INVALID: return "GROUP_CIPHER_INVALID";
+        case WIFI_REASON_PAIRWISE_CIPHER_INVALID: return "PAIRWISE_CIPHER_INVALID";
+        case WIFI_REASON_AKMP_INVALID: return "AKMP_INVALID";
+        case WIFI_REASON_UNSUPP_RSN_IE_VERSION: return "UNSUPP_RSN_IE_VERSION";
+        case WIFI_REASON_INVALID_RSN_IE_CAP: return "INVALID_RSN_IE_CAP";
+        case WIFI_REASON_802_1X_AUTH_FAILED: return "802_1X_AUTH_FAILED";
+        case WIFI_REASON_CIPHER_SUITE_REJECTED: return "CIPHER_SUITE_REJECTED";
+        case WIFI_REASON_CONNECTION_FAIL: return "CONNECTION_FAIL";
+
+        default: {
+            String result = "Error ";
+            result += reason;
+            return result;
+        }
     }
 }
 

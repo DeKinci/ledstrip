@@ -2,13 +2,13 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebSocketsServer.h>
+#include <HttpServer.h>
+#include <WiFiMan.h>
 #include "rsc/w_index_htm.h"
 
-WiFiServer server(80);
+HttpServer http(80);
 WebSocketsServer webSocket(81);
-
-const char* ssid = "Citadel";
-const char* password = "kekovino4ka";
+WiFiMan::WiFiManager wifiManager(&httpDispatcher);
 
 void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload,
                     size_t length) {
@@ -30,114 +30,64 @@ void webSocketEvent(uint8_t num, WStype_t type, uint8_t* payload,
     }
 }
 
-static bool readHeaders(WiFiClient& client, String& request,
-                        uint32_t firstByteDeadlineMs = 5000,
-                        uint32_t headerDeadlineMs = 500) {
-    uint32_t t0 = millis();
-
-    // Wait for first byte (longer deadline)
-    while (client.connected() && !client.available()) {
-        if (millis() - t0 > firstByteDeadlineMs)
-            return false;  // no data
-        webSocket.loop();  // Keep WebSocket responsive
-        delay(1);
-        yield();
-    }
-
-    // First byte arrived, now finish headers (shorter deadline)
-    uint32_t tFirst = millis();
-    while (client.connected() && millis() - tFirst < headerDeadlineMs) {
-        while (client.available()) {
-            char c = client.read();
-            request += c;
-            if (request.endsWith("\r\n\r\n"))
-                return true;
-        }
-        webSocket.loop();  // Keep WebSocket responsive
-        delay(1);
-        yield();
-    }
-    return request.endsWith("\r\n\r\n");
-}
-
 void setup() {
     Serial.begin(115200);
     delay(600);  // crucial for wifi
-    Serial.println("\n\n=== MINIMAL HTTP + WebSocket ===");
+    Serial.println("\n\n=== HTTP + WebSocket + WiFiMan ===");
 
-    WiFi.begin();
-    WiFi.mode(WIFI_STA);
-    WiFi.disconnect(true);
-    WiFi.setSleep(false);  // <--- low latency
-    WiFi.begin(ssid, password);
+    // Configure WiFiManager
+    wifiManager.setAPCredentials("LED-Setup", "");  // Open AP for setup
+    wifiManager.setHostname("ledstrip");
+    wifiManager.credentials().addNetwork("Citadel", "kekovino4ka", 100);  // Default network
 
-    Serial.printf("Connecting to %s", ssid);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(250);
-        Serial.print(".");
-    }
-    Serial.printf("\n✓ WiFi Connected: %s  RSSI=%d dBm\n",
-                  WiFi.localIP().toString().c_str(), WiFi.RSSI());
+    // Register app routes BEFORE wifiManager.begin() so they're available
+    // Note: "/" has priority 0, captive portal uses priority 100 to override in AP mode
+    httpDispatcher.onGet("/", [](HttpRequest& req) {
+        return HttpResponse::html(index_htm, index_htm_len);
+    });
 
-    server.begin();
-    Serial.println("✓ HTTP server on port 80");
+    httpDispatcher.onGet("/ping", [](HttpRequest& req) {
+        return HttpResponse::text("pong");
+    });
+
+    httpDispatcher.onPost("/echo", [](HttpRequest& req) {
+        return HttpResponse::json(req.body().toString());
+    });
+
+    // Start WiFiManager (registers /wifiman routes, handles WiFi connection)
+    wifiManager.begin();
+
+    // Callback when connected
+    wifiManager.onConnected([](const String& ssid) {
+        Serial.printf("Connected to %s, starting servers\n", ssid.c_str());
+        WiFi.setSleep(false);  // Low latency mode
+    });
+
+    // Start HTTP server (works in both AP and STA mode)
+    http.begin();
+    Serial.println("HTTP server on port 80");
 
     webSocket.begin();
     webSocket.onEvent(webSocketEvent);
-    Serial.println("✓ WebSocket on port 81");
+    Serial.println("WebSocket on port 81");
 
+    Serial.printf("Registered %d routes\n", httpDispatcher.routeCount());
     Serial.println("=== Ready ===");
 }
 
 void loop() {
-    webSocket.loop();  // Always process WebSocket events
+    wifiManager.loop();
+    webSocket.loop();
+    http.loop();
 
-    WiFiClient client = server.available();
-    if (!client) {
-        static uint32_t last = 0;
-        if (millis() - last > 10000) {
-            last = millis();
-            Serial.printf("Free heap: %u, RSSI: %d dBm, WS clients: %u\n",
-                          ESP.getFreeHeap(), WiFi.RSSI(),
-                          webSocket.connectedClients());
-        }
-        return;
+    static uint32_t last = 0;
+    if (millis() - last > 10000) {
+        last = millis();
+        Serial.printf("Free heap: %lu, RSSI: %d dBm, WS clients: %u, WiFi: %s\n",
+                      ESP.getFreeHeap(), WiFi.RSSI(),
+                      webSocket.connectedClients(),
+                      wifiManager.getStateString().c_str());
     }
-
-    client.setNoDelay(true);  // <--- avoid extra RTTs
-    uint32_t tStart = millis();
-    Serial.printf("%u  Request started\n", tStart);
-
-    String req;
-    bool got = readHeaders(client, req);
-    Serial.printf("Request: %s\n", req.c_str());
-
-    if (got && req.startsWith("GET / ")) {
-        client.print(
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/html\r\n"
-            "Connection: close\r\n");
-        client.printf("Content-Length: %d\r\n\r\n", index_htm_len);
-        client.write(index_htm, index_htm_len);
-    } else if (got && req.startsWith("GET /ping ")) {
-        client.print(
-            "HTTP/1.1 200 OK\r\n"
-            "Content-Type: text/plain\r\n"
-            "Content-Length: 4\r\n"
-            "Connection: close\r\n"
-            "\r\n");
-        client.write("pong", 4);  // exactly 4 bytes
-    } else if (req.length()) {
-        client.print(
-            "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
-    } else {
-        // No headers received — best to 408 the client to be explicit
-        client.print(
-            "HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n");
-    }
-
-    client.stop();
-    Serial.printf("%u  Request done (%u ms)\n", millis(), millis() - tStart);
 }
 
 

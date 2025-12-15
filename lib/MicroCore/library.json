@@ -1,0 +1,8 @@
+{
+    "name": "MicroCore",
+    "version": "1.0.0",
+    "description": "Lightweight core utilities for embedded systems",
+    "keywords": "embedded, string, utilities",
+    "frameworks": ["arduino", "espidf"],
+    "platforms": "*"
+}

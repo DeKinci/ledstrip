@@ -7,7 +7,7 @@ void test_simple_get_request() {
     String raw = "GET /ping HTTP/1.1\r\n\r\n";
 
     TEST_ASSERT_TRUE(req.parse(raw));
-    TEST_ASSERT_TRUE(req.isValid());
+    TEST_ASSERT_TRUE(req);  // operator bool
     TEST_ASSERT_EQUAL_STRING("GET", req.method().c_str());
     TEST_ASSERT_EQUAL_STRING("/ping", req.path().c_str());
     TEST_ASSERT_EQUAL_STRING("HTTP/1.1", req.version().c_str());
@@ -102,7 +102,7 @@ void test_invalid_request_no_separator() {
     String raw = "GET /ping HTTP/1.1\r\n";  // Missing \r\n\r\n
 
     TEST_ASSERT_FALSE(req.parse(raw));
-    TEST_ASSERT_FALSE(req.isValid());
+    TEST_ASSERT_FALSE(req);  // operator bool
 }
 
 void test_invalid_request_bad_format() {
@@ -110,7 +110,7 @@ void test_invalid_request_bad_format() {
     String raw = "INVALID\r\n\r\n";
 
     TEST_ASSERT_FALSE(req.parse(raw));
-    TEST_ASSERT_FALSE(req.isValid());
+    TEST_ASSERT_FALSE(req);  // operator bool
 }
 
 void test_empty_request() {
@@ -118,7 +118,7 @@ void test_empty_request() {
     String raw = "";
 
     TEST_ASSERT_FALSE(req.parse(raw));
-    TEST_ASSERT_FALSE(req.isValid());
+    TEST_ASSERT_FALSE(req);  // operator bool
 }
 
 void test_root_path() {

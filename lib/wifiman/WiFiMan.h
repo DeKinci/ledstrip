@@ -4,7 +4,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <DNSServer.h>
-#include <ESPAsyncWebServer.h>
+#include <HttpDispatcher.h>
 #include "WiFiCredentials.h"
 
 namespace WiFiMan {
@@ -28,7 +28,7 @@ enum class ConnectionResult {
 
 class WiFiManager {
 public:
-    WiFiManager(AsyncWebServer* server = nullptr);
+    WiFiManager(HttpDispatcher* dispatcher = nullptr);
     ~WiFiManager();
 
     // Configuration
@@ -58,6 +58,8 @@ public:
     String getStateString() const;
     String getCurrentSSID() const;
     IPAddress getIP() const;
+    String getLastError() const { return _lastError; }
+    void clearError() { _lastError = ""; }
 
     // Callbacks
     void onConnected(std::function<void(const String& ssid)> callback);
@@ -67,7 +69,7 @@ public:
 
 private:
     WiFiCredentials creds;
-    AsyncWebServer* webServer;
+    HttpDispatcher* _dispatcher;
     DNSServer* dnsServer;
 
     State state;
@@ -87,6 +89,14 @@ private:
     int consecutiveFailures;  // Track consecutive connection failures
     std::vector<NetworkCredential*> sortedNetworks;
     std::vector<NetworkCredential*> availableNetworks;  // Networks found in last scan
+
+    // Route handles for captive portal (removable when leaving AP mode)
+    HttpDispatcher::RouteHandle _captiveRootHandle;
+    HttpDispatcher::RouteHandle _captiveDetectHandles[8];  // Captive portal detection endpoints
+    int _captiveDetectCount = 0;
+
+    // Error tracking
+    String _lastError;
 
     // Callbacks
     std::function<void(const String&)> connectedCallback;
@@ -109,12 +119,13 @@ private:
     ConnectionResult tryNextNetwork();
     void transitionToState(State newState);
     void scanAvailableNetworks();
-    void setupWebServer();
-    void teardownWebServer();
+    void setupRoutes();           // Permanent routes at /wifiman/*
+    void setupCaptivePortal();    // High-priority routes for AP mode
+    void teardownCaptivePortal(); // Remove captive portal routes
 
     // WiFi event handlers
-    static void onWiFiEvent(WiFiEvent_t event);
-    void handleWiFiEvent(WiFiEvent_t event);
+    void handleWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info);
+    static String reasonToString(uint8_t reason);
 
     static WiFiManager* instance;  // For static event handler
 };
