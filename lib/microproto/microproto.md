@@ -46,7 +46,9 @@ u8 batch_count       // Number of operations in batch (1-255, value is count-1, 
 | 0x5 | RPC_CALL | Bidirectional | Call remote function |
 | 0x6 | RPC_RESPONSE | Bidirectional | Response to RPC call |
 | 0x7 | ERROR | Bidirectional | Error message |
-| 0x8-0xF | RESERVED | - | Reserved for future use |
+| 0x8 | PING | Bidirectional | Heartbeat request |
+| 0x9 | PONG | Bidirectional | Heartbeat response |
+| 0xA-0xF | RESERVED | - | Reserved for future use |
 
 ---
 
@@ -95,7 +97,7 @@ u32 server_timestamp       // Unix timestamp for sync (little-endian)
 
 ### 2.3 Resynchronization During Active Connection
 
-If client becomes out-of-sync (e.g., missed messages, timeout, network hiccup):
+If client becomes out-of-sync (e.g., missed messages, unknown id, timeout, network hiccup):
 - Client sends HELLO again (without disconnecting transport)
 - Server treats it as fresh connection: sends HELLO → SCHEMA_UPSERT → PROPERTY_UPDATE
 - Client clears local state and rebuilds from server messages
@@ -346,15 +348,14 @@ u8 ui_hints_flags {
     has_widget_hint: bit1
     has_unit: bit1
     has_icon: bit1
-    has_color: bit1
-    reserved: bit4
+    reserved: bit1
+    colorgroup: bit4
 }
 [u8 widget_hint]           // 0=auto, 1=slider, 2=toggle, 3=color_picker, 4=text_input, etc.
 [varint unit_length]       // Unit string (e.g., "ms", "%", "°C")
   [bytes unit]             // ASCII
 [varint icon_length]       // Icon identifier
   [bytes icon]             // ASCII
-[u32 color]                // RGBA color for UI (little-endian)
 
 // For FUNCTION type only:
 u8 param_count             // Number of parameters
@@ -403,7 +404,9 @@ u8 type_id                 // Type from section 3
     has_min_length: bit1
     has_max_length: bit1
     has_unique: bit1       // Elements must be unique
-    reserved: bit5
+    is_sorted: bit1        // Elements must be sorted ascending
+    is_reverse_sorted: bit1 // Elements must be sorted descending
+    reserved: bit3
   }
   [varint min_length]      // Minimum list length
   [varint max_length]      // Maximum list length
@@ -785,6 +788,50 @@ varint message_length
 bytes message              // ARRAY(UINT8) - UTF-8 error description
 [u8 related_opcode]        // Optional: opcode that caused error
 ```
+
+### 8.2 PING (opcode 0x8)
+
+Heartbeat request to verify connection liveness. Can be sent by either side.
+
+```
+u8 operation_header { opcode: 0x8, flags: 0, batch: 0 }
+u32 payload                // Echo payload (little-endian), typically incrementing counter
+```
+
+**Usage**:
+- Client sends PING periodically (e.g., every 5 seconds)
+- Server must respond with PONG containing same payload
+- If no PONG received within timeout (e.g., 10 seconds), consider connection lost
+
+### 8.3 PONG (opcode 0x9)
+
+Heartbeat response. Must echo the payload from PING.
+
+```
+u8 operation_header { opcode: 0x9, flags: 0, batch: 0 }
+u32 payload                // Same payload from PING request (little-endian)
+```
+
+**Example heartbeat sequence**:
+```
+Client → Server: PING
+  08 01 00 00 00           // opcode=8, payload=1
+
+Server → Client: PONG
+  09 01 00 00 00           // opcode=9, payload=1
+
+// 5 seconds later...
+Client → Server: PING
+  08 02 00 00 00           // opcode=8, payload=2
+
+Server → Client: PONG
+  09 02 00 00 00           // opcode=9, payload=2
+```
+
+**Recommended intervals**:
+- PING interval: 5000ms
+- PONG timeout: 10000ms
+- On timeout: Close connection, attempt reconnect
 
 ---
 

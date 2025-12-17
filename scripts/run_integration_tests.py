@@ -35,6 +35,9 @@ from integration.test_microproto import (
     test_microproto_stress,
     test_microproto_reconnect,
     test_microproto_ping,
+    test_schema_constraints,
+    test_constraint_validation,
+    test_container_updates,
 )
 
 
@@ -62,6 +65,9 @@ def run_test_suite(ip: str) -> List[TestResult]:
     # MicroProto Tests
     results.append(test_microproto(ip))
     results.append(test_microproto_ping(ip, count=10))
+    results.append(test_schema_constraints(ip))
+    results.append(test_constraint_validation(ip))
+    results.append(test_container_updates(ip))
     results.append(test_microproto_stress(ip, duration=5))
     results.append(test_microproto_reconnect(ip, count=5))
 

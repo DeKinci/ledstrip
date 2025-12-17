@@ -98,50 +98,133 @@
             propsContainer.innerHTML = '';
 
             for (const [name, info] of Object.entries(props)) {
+                // Get full property object for description, constraints and UI hints
+                const prop = client.properties.get(info.id);
+                const desc = prop?.description;
+                const c = prop?.constraints || {};
+                const ec = prop?.elementConstraints || {};
+                const ui = prop?.ui || {};
+
                 const div = document.createElement('div');
                 div.className = 'form-control';
                 div.id = `prop-${name}`;
 
+                // Build label with optional icon and color
+                const iconHtml = ui.icon ? `<span class="mr-1">${ui.icon}</span>` : '';
+                const colorStyle = ui.colorHex ? `style="color: ${ui.colorHex}"` : '';
+                const labelHtml = `<span class="label-text" ${colorStyle}>${iconHtml}${name}</span>`;
+
+                // Description helper
+                const descHtml = desc ? `<p class="text-xs opacity-50 -mt-1 mb-1">${desc}</p>` : '';
+
+                // Unit suffix for values
+                const unitSuffix = ui.unit ? ` ${ui.unit}` : '';
+
                 if (info.type === 0x01) { // BOOL
+                    // Widget hint: 1=toggle (default), 2=checkbox
+                    const useCheckbox = ui.widget === 2;
+                    const inputClass = useCheckbox ? 'checkbox checkbox-primary' : 'toggle toggle-primary';
                     div.innerHTML = `
                         <label class="label cursor-pointer">
-                            <span class="label-text">${name}</span>
-                            <input type="checkbox" class="toggle toggle-primary"
+                            <div>
+                                <span class="label-text" ${colorStyle}>${iconHtml}${name}</span>
+                                ${desc ? `<p class="text-xs opacity-50">${desc}</p>` : ''}
+                            </div>
+                            <input type="checkbox" class="${inputClass}"
                                    ${info.value ? 'checked' : ''}
                                    ${info.readonly ? 'disabled' : ''}
                                    onchange="client.setProperty('${name}', this.checked)">
                         </label>
                     `;
                 } else if (info.type === 0x03) { // UINT8
-                    div.innerHTML = `
-                        <label class="label">
-                            <span class="label-text">${name}</span>
-                            <span class="label-text-alt" id="val-${name}">${info.value}</span>
-                        </label>
-                        <input type="range" min="0" max="255" value="${info.value}"
-                               class="range range-primary range-sm"
-                               ${info.readonly ? 'disabled' : ''}
-                               oninput="document.getElementById('val-${name}').textContent = this.value"
-                               onchange="client.setProperty('${name}', parseInt(this.value))">
-                    `;
+                    const min = c.hasMin ? c.min : 0;
+                    const max = c.hasMax ? c.max : 255;
+                    const step = c.hasStep ? c.step : 1;
+                    // Widget hint: 1=slider (default), 2=input
+                    const useInput = ui.widget === 2;
+                    if (useInput) {
+                        div.innerHTML = `
+                            <label class="label">
+                                ${labelHtml}
+                                <span class="label-text-alt">${unitSuffix}</span>
+                            </label>
+                            ${descHtml}
+                            <input type="number" min="${min}" max="${max}" step="${step}" value="${info.value}"
+                                   class="input input-bordered input-sm w-full"
+                                   ${info.readonly ? 'disabled' : ''}
+                                   onchange="client.setProperty('${name}', parseInt(this.value))">
+                        `;
+                    } else {
+                        div.innerHTML = `
+                            <label class="label">
+                                ${labelHtml}
+                                <span class="label-text-alt" id="val-${name}">${info.value}${unitSuffix}</span>
+                            </label>
+                            ${descHtml}
+                            <input type="range" min="${min}" max="${max}" step="${step}" value="${info.value}"
+                                   class="range range-primary range-sm"
+                                   ${info.readonly ? 'disabled' : ''}
+                                   oninput="document.getElementById('val-${name}').textContent = this.value + '${unitSuffix}'"
+                                   onchange="client.setProperty('${name}', parseInt(this.value))">
+                        `;
+                    }
                 } else if (info.type === 0x05) { // FLOAT32
+                    const min = c.hasMin ? c.min : 0;
+                    const max = c.hasMax ? c.max : 10;
+                    const step = c.hasStep ? c.step : 0.1;
+                    // Widget hint: 1=slider (default), 2=input
+                    const useInput = ui.widget === 2;
+                    if (useInput) {
+                        div.innerHTML = `
+                            <label class="label">
+                                ${labelHtml}
+                                <span class="label-text-alt">${unitSuffix}</span>
+                            </label>
+                            ${descHtml}
+                            <input type="number" min="${min}" max="${max}" step="${step}" value="${info.value.toFixed(2)}"
+                                   class="input input-bordered input-sm w-full"
+                                   ${info.readonly ? 'disabled' : ''}
+                                   onchange="client.setProperty('${name}', parseFloat(this.value))">
+                        `;
+                    } else {
+                        div.innerHTML = `
+                            <label class="label">
+                                ${labelHtml}
+                                <span class="label-text-alt" id="val-${name}">${info.value.toFixed(2)}${unitSuffix}</span>
+                            </label>
+                            ${descHtml}
+                            <input type="range" min="${min}" max="${max}" step="${step}" value="${info.value}"
+                                   class="range range-primary range-sm"
+                                   ${info.readonly ? 'disabled' : ''}
+                                   oninput="document.getElementById('val-${name}').textContent = parseFloat(this.value).toFixed(2) + '${unitSuffix}'"
+                                   onchange="client.setProperty('${name}', parseFloat(this.value))">
+                        `;
+                    }
+                } else if (info.type === 0x20) { // ARRAY
+                    const vals = Array.isArray(info.value) ? info.value.join(', ') : info.value;
                     div.innerHTML = `
                         <label class="label">
-                            <span class="label-text">${name}</span>
-                            <span class="label-text-alt" id="val-${name}">${info.value.toFixed(2)}</span>
+                            ${labelHtml}
+                            <span class="label-text-alt badge badge-ghost" id="val-${name}">[${vals}]</span>
                         </label>
-                        <input type="range" min="0" max="10" step="0.1" value="${info.value}"
-                               class="range range-primary range-sm"
-                               ${info.readonly ? 'disabled' : ''}
-                               oninput="document.getElementById('val-${name}').textContent = parseFloat(this.value).toFixed(2)"
-                               onchange="client.setProperty('${name}', parseFloat(this.value))">
+                        ${descHtml}
+                    `;
+                } else if (info.type === 0x21) { // LIST
+                    const vals = Array.isArray(info.value) ? info.value.join(', ') : info.value;
+                    div.innerHTML = `
+                        <label class="label">
+                            ${labelHtml}
+                            <span class="label-text-alt badge badge-ghost" id="val-${name}">[${vals}]</span>
+                        </label>
+                        ${descHtml}
                     `;
                 } else {
                     div.innerHTML = `
                         <label class="label">
-                            <span class="label-text">${name}</span>
-                            <span class="label-text-alt">${info.value} (type ${info.type})</span>
+                            ${labelHtml}
+                            <span class="label-text-alt">${info.value}</span>
                         </label>
+                        ${descHtml}
                     `;
                 }
 
@@ -153,19 +236,26 @@
             const prop = client.properties.get(client.propertyByName.get(name));
             if (!prop) return;
 
+            const ui = prop.ui || {};
+            const unitSuffix = ui.unit ? ` ${ui.unit}` : '';
+
             if (prop.typeId === 0x01) { // BOOL
                 const input = document.querySelector(`#prop-${name} input`);
                 if (input) input.checked = value;
             } else if (prop.typeId === 0x03) { // UINT8
-                const input = document.querySelector(`#prop-${name} input[type="range"]`);
+                const rangeInput = document.querySelector(`#prop-${name} input[type="range"]`);
+                const numInput = document.querySelector(`#prop-${name} input[type="number"]`);
                 const label = document.getElementById(`val-${name}`);
-                if (input) input.value = value;
-                if (label) label.textContent = value;
+                if (rangeInput) rangeInput.value = value;
+                if (numInput) numInput.value = value;
+                if (label) label.textContent = value + unitSuffix;
             } else if (prop.typeId === 0x05) { // FLOAT32
-                const input = document.querySelector(`#prop-${name} input[type="range"]`);
+                const rangeInput = document.querySelector(`#prop-${name} input[type="range"]`);
+                const numInput = document.querySelector(`#prop-${name} input[type="number"]`);
                 const label = document.getElementById(`val-${name}`);
-                if (input) input.value = value;
-                if (label) label.textContent = value.toFixed(2);
+                if (rangeInput) rangeInput.value = value;
+                if (numInput) numInput.value = value.toFixed(2);
+                if (label) label.textContent = value.toFixed(2) + unitSuffix;
             }
         }
 

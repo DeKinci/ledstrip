@@ -399,7 +399,7 @@ test('decodes single schema item', () => {
         0x03,           // type ID: UINT8
         0,              // validation flags
         128,            // default value
-        0               // UI hints
+        0               // UI hints (no hints)
     ]);
 
     client._handleMessage(msg);
@@ -409,6 +409,95 @@ test('decodes single schema item', () => {
     assertEqual(schemaProp.typeId, 0x03, 'typeId');
     assertEqual(client.properties.size, 1, 'properties count');
     assertEqual(client.propertyByName.get('brightness'), 3, 'name lookup');
+});
+
+test('decodes schema with UI hints', () => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+
+    let schemaProp = null;
+    client.on('schema', (prop) => {
+        schemaProp = prop;
+    });
+
+    const name = 'speed';
+    const nameBytes = new TextEncoder().encode(name);
+    const unit = 'ms';
+    const unitBytes = new TextEncoder().encode(unit);
+    const icon = '⚡';
+    const iconBytes = new TextEncoder().encode(icon);
+
+    // UI hints flags: colorgroup in upper 4 bits, flags in lower 4 bits
+    // AMBER = 2, hasWidget(1) + hasUnit(2) + hasIcon(4) = 0x07
+    // Combined: (2 << 4) | 0x07 = 0x27
+    const msg = new Uint8Array([
+        0x03,           // SCHEMA_UPSERT opcode (no batch)
+        0x01,           // item type: PROPERTY
+        0x00,           // level flags: ROOT
+        5,              // item ID
+        0,              // namespace ID
+        nameBytes.length, // name length
+        ...nameBytes,   // name
+        0,              // description length (varint)
+        0x03,           // type ID: UINT8
+        0,              // validation flags
+        100,            // default value
+        // UI hints (color in upper 4 bits of flags)
+        0x27,           // flags: colorgroup=2 (AMBER) | hasWidget | hasUnit | hasIcon
+        1,              // widget hint: SLIDER (first per spec order)
+        unitBytes.length, // unit length
+        ...unitBytes,   // unit: "ms"
+        iconBytes.length, // icon length
+        ...iconBytes    // icon: "⚡"
+    ]);
+
+    client._handleMessage(msg);
+
+    assertEqual(schemaProp.id, 5, 'id');
+    assertEqual(schemaProp.name, 'speed', 'name');
+    assertEqual(schemaProp.ui.color, 'amber', 'color name');
+    assertEqual(schemaProp.ui.colorHex, '#fcd34d', 'color hex');
+    assertEqual(schemaProp.ui.unit, 'ms', 'unit');
+    assertEqual(schemaProp.ui.icon, '⚡', 'icon');
+    assertEqual(schemaProp.ui.widget, 1, 'widget');
+});
+
+test('decodes schema with partial UI hints', () => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+
+    let schemaProp = null;
+    client.on('schema', (prop) => {
+        schemaProp = prop;
+    });
+
+    const name = 'temp';
+    const nameBytes = new TextEncoder().encode(name);
+    const unit = '°C';
+    const unitBytes = new TextEncoder().encode(unit);
+
+    // UI hints flags: hasUnit(2) only = 0x02
+    const msg = new Uint8Array([
+        0x03,           // SCHEMA_UPSERT opcode (no batch)
+        0x01,           // item type: PROPERTY
+        0x00,           // level flags: ROOT
+        7,              // item ID
+        0,              // namespace ID
+        nameBytes.length,
+        ...nameBytes,
+        0,              // description length
+        0x05,           // type ID: FLOAT32
+        0,              // validation flags
+        0, 0, 0, 0,     // default value (float 0.0)
+        0x02,           // flags: hasUnit only
+        unitBytes.length,
+        ...unitBytes
+    ]);
+
+    client._handleMessage(msg);
+
+    assertEqual(schemaProp.ui.color, null, 'no color');
+    assertEqual(schemaProp.ui.unit, '°C', 'unit');
+    assertEqual(schemaProp.ui.icon, null, 'no icon');
+    assertEqual(schemaProp.ui.widget, 0, 'no widget');
 });
 
 // ============== Varint Decoding Tests ==============

@@ -34,7 +34,30 @@ class MicroProtoClient {
         UINT8: 0x03,
         INT32: 0x04,
         FLOAT32: 0x05,
-        STRING: 0x10
+        STRING: 0x10,
+        ARRAY: 0x20,
+        LIST: 0x21,
+        OBJECT: 0x22
+    };
+    // Pastel color palette (matches UIColor enum in PropertyBase.h)
+    static COLORS = {
+        0: null,              // NONE
+        1: '#fda4af',         // ROSE
+        2: '#fcd34d',         // AMBER
+        3: '#bef264',         // LIME
+        4: '#67e8f9',         // CYAN
+        5: '#c4b5fd',         // VIOLET
+        6: '#f9a8d4',         // PINK
+        7: '#5eead4',         // TEAL
+        8: '#fdba74',         // ORANGE
+        9: '#7dd3fc',         // SKY
+        10: '#a5b4fc',        // INDIGO
+        11: '#6ee7b7',        // EMERALD
+        12: '#cbd5e1'         // SLATE
+    };
+    static COLOR_NAMES = {
+        0: null, 1: 'rose', 2: 'amber', 3: 'lime', 4: 'cyan', 5: 'violet',
+        6: 'pink', 7: 'teal', 8: 'orange', 9: 'sky', 10: 'indigo', 11: 'emerald', 12: 'slate'
     };
 
     constructor(url, options = {}) {
@@ -346,28 +369,67 @@ class MicroProtoClient {
         const name = new TextDecoder().decode(data.slice(offset, offset + nameLen));
         offset += nameLen;
 
-        // Description (varint length)
+        // Description (varint length + string)
         const [descLen, varintBytes] = this._decodeVarint(data, offset);
         offset += varintBytes;
-        offset += descLen;  // Skip description
+        const description = descLen > 0
+            ? new TextDecoder().decode(data.slice(offset, offset + descLen))
+            : null;
+        offset += descLen;
 
-        // Type ID
+        // DATA_TYPE_DEFINITION - Type ID
         const typeId = data[offset++];
 
-        // Validation flags (skip)
-        offset++;
+        // Container type info and constraints
+        let elementCount = 0;
+        let elementTypeId = 0;
+        let constraints = {};
+        let elementConstraints = {};
+        let lengthConstraints = {};
 
-        // Default value
-        const valueSize = this._getTypeSize(typeId);
-        offset += valueSize;
+        if (typeId === MicroProtoClient.TYPES.ARRAY) {
+            // ARRAY: varint(element_count) + element DATA_TYPE_DEFINITION
+            const [count, countBytes] = this._decodeVarint(data, offset);
+            elementCount = count;
+            offset += countBytes;
+            // Element DATA_TYPE_DEFINITION: element_type_id + element_validation_flags [+ min/max/step]
+            elementTypeId = data[offset++];
+            const result = this._parseValidationConstraints(data, offset, elementTypeId);
+            elementConstraints = result.constraints;
+            offset = result.newOffset;
+        } else if (typeId === MicroProtoClient.TYPES.LIST) {
+            // LIST: length_constraints + element DATA_TYPE_DEFINITION
+            const lenResult = this._parseLengthConstraints(data, offset);
+            lengthConstraints = lenResult.lengthConstraints;
+            offset = lenResult.newOffset;
+            // Element DATA_TYPE_DEFINITION: element_type_id + element_validation_flags [+ min/max/step]
+            elementTypeId = data[offset++];
+            const elemResult = this._parseValidationConstraints(data, offset, elementTypeId);
+            elementConstraints = elemResult.constraints;
+            offset = elemResult.newOffset;
+        } else {
+            // Basic type: validation_flags [+ min/max/step values]
+            const result = this._parseValidationConstraints(data, offset, typeId);
+            constraints = result.constraints;
+            offset = result.newOffset;
+        }
 
-        // UI hints (skip)
-        offset++;
+        // Default value - skip based on type
+        const defaultValueSize = this._getDefaultValueSize(typeId, elementTypeId, elementCount, data, offset);
+        offset += defaultValueSize;
+
+        // Parse UI hints
+        const uiResult = this._parseUIHints(data, offset);
+        const ui = uiResult.ui;
+        offset = uiResult.newOffset;
 
         return [{
             id,
             name,
+            description,           // Human-readable description (or null)
             typeId,
+            elementTypeId,
+            elementCount,
             readonly,
             persistent,
             hidden,
@@ -375,8 +437,152 @@ class MicroProtoClient {
             groupId,
             namespaceId,
             bleExposed,
+            constraints,           // For basic types: { min, max, step }
+            elementConstraints,    // For ARRAY/LIST: element constraints
+            lengthConstraints,     // For LIST: { minLength, maxLength }
+            ui,                    // UI hints: { color, colorHex, unit, icon, widget }
             value: null
         }, offset];
+    }
+
+    _getDefaultValueSize(typeId, elementTypeId, elementCount, data, offset) {
+        if (typeId === MicroProtoClient.TYPES.ARRAY) {
+            // ARRAY: fixed count * element size
+            return elementCount * this._getBasicTypeSize(elementTypeId);
+        } else if (typeId === MicroProtoClient.TYPES.LIST) {
+            // LIST: varint(count) + count * element size
+            const [count, countBytes] = this._decodeVarint(data, offset);
+            return countBytes + count * this._getBasicTypeSize(elementTypeId);
+        } else {
+            return this._getBasicTypeSize(typeId);
+        }
+    }
+
+    _getBasicTypeSize(typeId) {
+        switch (typeId) {
+            case MicroProtoClient.TYPES.BOOL:
+            case MicroProtoClient.TYPES.INT8:
+            case MicroProtoClient.TYPES.UINT8:
+                return 1;
+            case MicroProtoClient.TYPES.INT32:
+            case MicroProtoClient.TYPES.FLOAT32:
+                return 4;
+            default:
+                return 0;
+        }
+    }
+
+    // Parse validation constraints: flags byte + optional min/max/step values
+    // Returns: { constraints: {...}, newOffset }
+    _parseValidationConstraints(data, offset, typeId) {
+        const view = new DataView(data.buffer, data.byteOffset);
+        const constraints = { hasMin: false, hasMax: false, hasStep: false };
+
+        if (offset >= data.length) return { constraints, newOffset: offset };
+
+        const flags = data[offset++];
+        const typeSize = this._getBasicTypeSize(typeId);
+
+        // flags: bit 0 = hasMin, bit 1 = hasMax, bit 2 = hasStep
+        if (flags & 0x01) {
+            constraints.hasMin = true;
+            const [val] = this._decodeValue(view, offset, typeId);
+            constraints.min = val;
+            offset += typeSize;
+        }
+        if (flags & 0x02) {
+            constraints.hasMax = true;
+            const [val] = this._decodeValue(view, offset, typeId);
+            constraints.max = val;
+            offset += typeSize;
+        }
+        if (flags & 0x04) {
+            constraints.hasStep = true;
+            const [val] = this._decodeValue(view, offset, typeId);
+            constraints.step = val;
+            offset += typeSize;
+        }
+
+        return { constraints, newOffset: offset };
+    }
+
+    // Parse length constraints for LIST: flags byte + optional minLength/maxLength varints
+    // Returns: { lengthConstraints: {...}, newOffset }
+    _parseLengthConstraints(data, offset) {
+        const lengthConstraints = { hasMinLength: false, hasMaxLength: false };
+
+        if (offset >= data.length) return { lengthConstraints, newOffset: offset };
+
+        const flags = data[offset++];
+
+        // flags: bit 0 = hasMinLength, bit 1 = hasMaxLength
+        if (flags & 0x01) {
+            lengthConstraints.hasMinLength = true;
+            const [val, bytes] = this._decodeVarint(data, offset);
+            lengthConstraints.minLength = val;
+            offset += bytes;
+        }
+        if (flags & 0x02) {
+            lengthConstraints.hasMaxLength = true;
+            const [val, bytes] = this._decodeVarint(data, offset);
+            lengthConstraints.maxLength = val;
+            offset += bytes;
+        }
+
+        return { lengthConstraints, newOffset: offset };
+    }
+
+    // Parse UI hints: flags byte with colorgroup in upper 4 bits
+    // Wire format: flags (bit0:widget, bit1:unit, bit2:icon, bit3:reserved, bits4-7:colorgroup)
+    //              + [widget: u8] + [unit_len: u8, unit: bytes] + [icon_len: u8, icon: bytes]
+    // Returns: { ui: {...}, newOffset }
+    _parseUIHints(data, offset) {
+        const ui = {
+            color: null,       // Color name (e.g., 'rose', 'amber')
+            colorHex: null,    // Hex color code (e.g., '#fda4af')
+            unit: null,        // Unit label (e.g., 'ms', '%', '°C')
+            icon: null,        // Emoji icon (e.g., '💡', '🎨')
+            widget: 0          // Widget hint (0=auto, meaning depends on type)
+        };
+
+        if (offset >= data.length) return { ui, newOffset: offset };
+
+        const flags = data[offset++];
+        const hasWidget = !!(flags & 0x01);
+        const hasUnit = !!(flags & 0x02);
+        const hasIcon = !!(flags & 0x04);
+        const colorGroup = (flags >> 4) & 0x0F;  // Upper 4 bits
+
+        // Color from colorgroup (embedded in flags byte)
+        if (colorGroup > 0) {
+            ui.color = MicroProtoClient.COLOR_NAMES[colorGroup] || null;
+            ui.colorHex = MicroProtoClient.COLORS[colorGroup] || null;
+        }
+
+        // Widget hint (first per spec order)
+        if (hasWidget && offset < data.length) {
+            ui.widget = data[offset++];
+        }
+
+        // Unit string
+        if (hasUnit && offset < data.length) {
+            const unitLen = data[offset++];
+            if (unitLen > 0 && offset + unitLen <= data.length) {
+                ui.unit = new TextDecoder().decode(data.slice(offset, offset + unitLen));
+                offset += unitLen;
+            }
+        }
+
+        // Icon string (emoji)
+        if (hasIcon && offset < data.length) {
+            const iconLen = data[offset++];
+            if (iconLen > 0 && offset + iconLen <= data.length) {
+                ui.icon = new TextDecoder().decode(data.slice(offset, offset + iconLen));
+                offset += iconLen;
+            }
+        }
+
+        return { ui, newOffset: offset };
     }
 
     _handlePropertyUpdate(data, batch) {
@@ -402,7 +608,7 @@ class MicroProtoClient {
                 continue;
             }
 
-            const [value, bytesRead] = this._decodeValue(view, offset, prop.typeId);
+            const [value, bytesRead] = this._decodePropertyValue(view, data, offset, prop);
             offset += bytesRead;
 
             const oldValue = prop.value;
@@ -418,6 +624,44 @@ class MicroProtoClient {
             this._emit('ready', this.getProperties());
             // Start heartbeat after initial sync complete
             this._startHeartbeat();
+        }
+    }
+
+    _decodePropertyValue(view, data, offset, prop) {
+        const typeId = prop.typeId;
+
+        if (typeId === MicroProtoClient.TYPES.ARRAY) {
+            // ARRAY: fixed count elements (no length prefix)
+            const count = prop.elementCount;
+            const elementTypeId = prop.elementTypeId;
+            const elementSize = this._getBasicTypeSize(elementTypeId);
+            const values = [];
+            let bytesRead = 0;
+
+            for (let i = 0; i < count; i++) {
+                const [val, size] = this._decodeValue(view, offset + bytesRead, elementTypeId);
+                values.push(val);
+                bytesRead += size;
+            }
+            return [values, bytesRead];
+
+        } else if (typeId === MicroProtoClient.TYPES.LIST) {
+            // LIST: varint(count) + elements
+            const [count, countBytes] = this._decodeVarint(data, offset);
+            const elementTypeId = prop.elementTypeId;
+            const values = [];
+            let bytesRead = countBytes;
+
+            for (let i = 0; i < count; i++) {
+                const [val, size] = this._decodeValue(view, offset + bytesRead, elementTypeId);
+                values.push(val);
+                bytesRead += size;
+            }
+            return [values, bytesRead];
+
+        } else {
+            // Basic type
+            return this._decodeValue(view, offset, typeId);
         }
     }
 

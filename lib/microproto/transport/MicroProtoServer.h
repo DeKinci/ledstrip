@@ -44,6 +44,7 @@ public:
     void onPropertyUpdate(uint8_t propertyId, const void* value, size_t size) override;
     void onError(const ErrorMessage& error) override;
     void onPing(uint32_t payload) override;
+    void onConstraintViolation(uint8_t propertyId, ErrorCode code) override;
 
 private:
     WebSocketsServer _ws;

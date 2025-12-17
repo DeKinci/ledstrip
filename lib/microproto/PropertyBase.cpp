@@ -4,7 +4,8 @@
 namespace MicroProto {
 
 // Static member initialization
-PropertyBase* PropertyBase::head = nullptr;
+std::array<PropertyBase*, PropertyBase::MAX_PROPERTIES> PropertyBase::byId = {};
+uint8_t PropertyBase::count = 0;
 uint8_t PropertyBase::nextId = 0;
 
 PropertyBase::PropertyBase(
@@ -14,19 +15,23 @@ PropertyBase::PropertyBase(
     bool readonly,
     bool hidden,
     bool ble_exposed,
-    uint8_t group_id
+    uint8_t group_id,
+    const char* description,
+    UIHints uiHints
 ) : id(nextId++),
     name(name),
+    description(description),
     level(level),
     persistent(persistent),
     readonly(readonly),
     hidden(hidden),
     ble_exposed(ble_exposed),
-    group_id(group_id)
+    group_id(group_id),
+    ui(uiHints)
 {
-    // Add to linked list
-    next = head;
-    head = this;
+    // Register in lookup array
+    byId[id] = this;
+    count++;
 }
 
 void PropertyBase::notifyChange() {

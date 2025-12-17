@@ -32,7 +32,12 @@ void MicroProtoServer::broadcastProperty(const PropertyBase* prop) {
     WriteBuffer wb(buf, sizeof(buf));
 
     if (PropertyUpdate::encodeShort(wb, prop)) {
-        _ws.broadcastBIN(buf, wb.position());
+        // Only send to clients that have completed handshake
+        for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
+            if (_clientReady[i]) {
+                _ws.sendBIN(i, buf, wb.position());
+            }
+        }
     }
 }
 
@@ -43,7 +48,12 @@ void MicroProtoServer::broadcastAllProperties() {
     WriteBuffer wb(buf, sizeof(buf));
 
     if (PropertyEncoder::encodeAllValues(wb) > 0) {
-        _ws.broadcastBIN(buf, wb.position());
+        // Only send to clients that have completed handshake
+        for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
+            if (_clientReady[i]) {
+                _ws.sendBIN(i, buf, wb.position());
+            }
+        }
     }
 }
 
@@ -65,24 +75,23 @@ void MicroProtoServer::onHello(const HelloRequest& hello) {
 }
 
 void MicroProtoServer::onPropertyUpdate(uint8_t propertyId, const void* value, size_t size) {
-    for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
-        if (p->id == propertyId) {
-            if (p->readonly) {
-                Serial.printf("[MicroProto] Rejected write to readonly prop %d\n", propertyId);
-                return;
-            }
-
-            p->setData(value, size);
-
-            Serial.printf("[MicroProto] Property %d updated by client %u\n",
-                          propertyId, _currentClient);
-
-            broadcastPropertyExcept(p, _currentClient);
-            return;
-        }
+    PropertyBase* p = PropertyBase::find(propertyId);
+    if (!p) {
+        Serial.printf("[MicroProto] Unknown property ID: %d\n", propertyId);
+        return;
     }
 
-    Serial.printf("[MicroProto] Unknown property ID: %d\n", propertyId);
+    if (p->readonly) {
+        Serial.printf("[MicroProto] Rejected write to readonly prop %d\n", propertyId);
+        return;
+    }
+
+    p->setData(value, size);
+
+    Serial.printf("[MicroProto] Property %d updated by client %u\n",
+                  propertyId, _currentClient);
+
+    broadcastPropertyExcept(p, _currentClient);
 }
 
 void MicroProtoServer::onError(const ErrorMessage& error) {
@@ -92,6 +101,12 @@ void MicroProtoServer::onError(const ErrorMessage& error) {
 
 void MicroProtoServer::onPing(uint32_t payload) {
     sendPong(_currentClient, payload);
+}
+
+void MicroProtoServer::onConstraintViolation(uint8_t propertyId, ErrorCode code) {
+    Serial.printf("[MicroProto] Constraint violation on property %d, sending error to client %u\n",
+                  propertyId, _currentClient);
+    sendError(_currentClient, ErrorMessage::validationFailed("Constraint violation"));
 }
 
 void MicroProtoServer::handleEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
@@ -204,9 +219,9 @@ void MicroProtoServer::broadcastPropertyExcept(const PropertyBase* prop, uint8_t
 }
 
 void MicroProtoServer::onPropertiesChanged(const DirtySet& dirty) {
-    for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
-        if (dirty.test(p->id)) {
-            _pendingBroadcast.set(p->id);
+    for (uint8_t i = 0; i < PropertyBase::count; i++) {
+        if (dirty.test(i)) {
+            _pendingBroadcast.set(i);
         }
     }
 }
@@ -223,17 +238,77 @@ void MicroProtoServer::flushBroadcasts() {
     if (now - _lastBroadcastTime < BROADCAST_INTERVAL_MS) return;
     _lastBroadcastTime = now;
 
-    uint8_t buf[TX_BUFFER_SIZE];
-    WriteBuffer wb(buf, sizeof(buf));
+    // Collect dirty properties into array for batched encoding
+    const PropertyBase* dirtyProps[PropertyBase::MAX_PROPERTIES];
+    size_t dirtyCount = 0;
 
-    for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
-        if (_pendingBroadcast.test(p->id)) {
-            PropertyUpdate::encodeShort(wb, p);
+    for (uint8_t i = 0; i < PropertyBase::count; i++) {
+        if (_pendingBroadcast.test(i)) {
+            PropertyBase* p = PropertyBase::byId[i];
+            if (p) {
+                dirtyProps[dirtyCount++] = p;
+            }
         }
     }
 
-    if (wb.position() > 0) {
-        _ws.broadcastBIN(buf, wb.position());
+    if (dirtyCount == 0) {
+        _pendingBroadcast.clearAll();
+        return;
+    }
+
+    // Encode in batches, flushing when buffer gets full
+    uint8_t buf[TX_BUFFER_SIZE];
+    size_t batchStart = 0;
+
+    while (batchStart < dirtyCount) {
+        WriteBuffer wb(buf, sizeof(buf));
+
+        // Try to fit as many properties as possible
+        size_t batchEnd = batchStart;
+        size_t lastGoodPos = 0;
+
+        // Write batch header (will update count later)
+        OpHeader header(OpCode::PROPERTY_UPDATE_SHORT, 0, true);
+        wb.writeByte(header.encode());
+        size_t countPos = wb.position();
+        wb.writeByte(0);  // Placeholder for count-1
+
+        while (batchEnd < dirtyCount) {
+            size_t posBefore = wb.position();
+
+            // Try encoding this property
+            const PropertyBase* prop = dirtyProps[batchEnd];
+            if (!wb.writeByte(prop->id)) break;
+
+            PropertyUpdateFlags flags;
+            if (!wb.writeByte(flags.encode())) {
+                wb.setPosition(posBefore);
+                break;
+            }
+
+            if (!TypeCodec::encodeProperty(wb, prop)) {
+                wb.setPosition(posBefore);
+                break;
+            }
+
+            lastGoodPos = wb.position();
+            batchEnd++;
+        }
+
+        size_t batchCount = batchEnd - batchStart;
+        if (batchCount == 0) break;  // Can't fit even one property
+
+        // Update count byte (count - 1)
+        buf[countPos] = static_cast<uint8_t>(batchCount - 1);
+
+        // Send to all ready clients
+        for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
+            if (_clientReady[i]) {
+                _ws.sendBIN(i, buf, lastGoodPos);
+            }
+        }
+
+        batchStart = batchEnd;
     }
 
     _pendingBroadcast.clearAll();

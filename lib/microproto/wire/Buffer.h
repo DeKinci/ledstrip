@@ -26,6 +26,14 @@ public:
     // Current write position
     size_t position() const { return _pos; }
 
+    // Set write position (for rollback on failed writes)
+    void setPosition(size_t pos) {
+        if (pos <= _capacity) {
+            _pos = pos;
+            _overflow = false;
+        }
+    }
+
     // Bytes remaining
     size_t remaining() const { return _capacity - _pos; }
 

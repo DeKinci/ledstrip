@@ -4,6 +4,8 @@
 #include <HttpServer.h>
 #include <WiFiMan.h>
 #include <Property.h>
+#include <ArrayProperty.h>
+#include <ListProperty.h>
 #include <PropertySystem.h>
 #include <transport/MicroProtoServer.h>
 #include "rsc/w_index_htm.h"
@@ -14,10 +16,42 @@ HttpServer http(80);
 MicroProto::MicroProtoServer protoServer(81);
 WiFiMan::WiFiManager wifiManager(&httpDispatcher);
 
-// Test properties
-PROPERTY_LOCAL(ledBrightness, uint8_t, 128, false, false, false);
-PROPERTY_LOCAL(speed, float, 1.0f, false, false, false);
-PROPERTY_LOCAL(enabled, bool, true, false, false, false);
+// Basic properties with constraints and UI hints
+MicroProto::Property<uint8_t> ledBrightness("ledBrightness", 128, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<uint8_t>().min(0).max(255).step(1),
+    "LED strip brightness level",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::AMBER).setIcon("💡").setUnit("%"));
+
+MicroProto::Property<float> speed("speed", 1.0f, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<float>().min(0.1f).max(10.0f).step(0.1f),
+    "Animation speed multiplier",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::CYAN).setIcon("⚡").setUnit("x"));
+
+MicroProto::Property<bool> enabled("enabled", true, MicroProto::PropertyLevel::LOCAL,
+    "Enable/disable LED output",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::EMERALD).setIcon("🔌"));
+
+// Container properties - ARRAY (fixed size) with element constraints
+MicroProto::ArrayProperty<uint8_t, 3> rgbColor("rgbColor", {255, 128, 0}, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::ArrayConstraints<uint8_t>().min(0).max(255),
+    "Primary RGB color [R, G, B]",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::PINK).setIcon("🎨"));
+
+MicroProto::ArrayProperty<int32_t, 2> position("position", {100, 200}, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::ArrayConstraints<int32_t>().min(-1000).max(1000),
+    "Animation position [X, Y]",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::SKY).setIcon("📍").setUnit("px"));
+
+// Container properties - LIST (variable size) with container and element constraints
+MicroProto::StringProperty<32> deviceName("deviceName", "LED Strip", MicroProto::PropertyLevel::LOCAL,
+    MicroProto::ListConstraints<uint8_t>().minLength(1).maxLength(32),
+    "Device display name",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::VIOLET).setIcon("📛"));
+
+MicroProto::ListProperty<uint8_t, 8> pattern("pattern", {10, 20, 30, 40}, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::ListConstraints<uint8_t>().minLength(1).maxLength(8).elementMin(0).elementMax(100),
+    "Animation pattern values (max 8)",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::TEAL).setIcon("📊"));
 
 void setup() {
     Serial.begin(115200);
@@ -84,6 +118,8 @@ void loop() {
     protoServer.loop();
     http.loop();
     MicroProto::PropertySystem::loop();
+
+    ledBrightness = ledBrightness + static_cast<uint8_t>(speed.get());
 
     static uint32_t last = 0;
     if (millis() - last > 10000) {

@@ -18,12 +18,15 @@ std::array<PropertySystem::FlushCallback, MICROPROTO_MAX_FLUSH_CALLBACKS> Proper
 void PropertySystem::init() {
     LOG_DEBUG(TAG, "Starting init...");
 
-    // Count registered properties
-    _numProperties = 0;
-    LOG_DEBUG(TAG, "Counting properties...");
-    for (PropertyBase* prop = PropertyBase::head; prop; prop = prop->next) {
-        LOG_DEBUG(TAG, "  Property %d: %s (persistent=%d)", _numProperties, prop->name, prop->persistent);
-        _numProperties++;
+    // Get property count from registry
+    _numProperties = PropertyBase::count;
+    LOG_DEBUG(TAG, "Found %d registered properties", _numProperties);
+
+    for (uint8_t i = 0; i < _numProperties; i++) {
+        PropertyBase* prop = PropertyBase::byId[i];
+        if (prop) {
+            LOG_DEBUG(TAG, "  Property %d: %s (persistent=%d)", i, prop->name, prop->persistent);
+        }
     }
 
     LOG_INFO(TAG, "Initialized with %d properties", _numProperties);
@@ -49,13 +52,11 @@ void PropertySystem::loop() {
     uint32_t now = millis();
     for (uint8_t i = 0; i < _numProperties; i++) {
         if (_persistDirty.test(i) && (now - _lastPersistTime[i]) >= PERSIST_DEBOUNCE_MS) {
-            // Find and save property
-            for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
-                if (p->id == i && p->persistent) {
-                    PropertyStorage::save(p);
-                    LOG_DEBUG(TAG, "Persisted property %d (%s)", p->id, p->name);
-                    break;
-                }
+            // Direct O(1) lookup
+            PropertyBase* p = PropertyBase::byId[i];
+            if (p && p->persistent) {
+                PropertyStorage::save(p);
+                LOG_DEBUG(TAG, "Persisted property %d (%s)", p->id, p->name);
             }
             _persistDirty.clear(i);
         }
@@ -76,8 +77,9 @@ void PropertySystem::markDirty(uint8_t property_id, bool persistent) {
 void PropertySystem::loadFromStorage() {
     LOG_DEBUG(TAG, "loadFromStorage() start");
     int loaded = 0;
-    for (PropertyBase* prop = PropertyBase::head; prop; prop = prop->next) {
-        if (prop->persistent) {
+    for (uint8_t i = 0; i < PropertyBase::count; i++) {
+        PropertyBase* prop = PropertyBase::byId[i];
+        if (prop && prop->persistent) {
             LOG_DEBUG(TAG, "  Loading property: %s (id=%d)", prop->name, prop->id);
             bool success = PropertyStorage::load(prop);
             if (success) loaded++;
@@ -87,8 +89,9 @@ void PropertySystem::loadFromStorage() {
 }
 
 void PropertySystem::saveToStorage() {
-    for (PropertyBase* prop = PropertyBase::head; prop; prop = prop->next) {
-        if (prop->persistent) {
+    for (uint8_t i = 0; i < PropertyBase::count; i++) {
+        PropertyBase* prop = PropertyBase::byId[i];
+        if (prop && prop->persistent) {
             PropertyStorage::save(prop);
         }
     }

@@ -83,10 +83,11 @@ void test_property_get_set_methods(void) {
 }
 
 void test_property_metadata(void) {
-    // Find property in linked list
+    // Find property in registry
     MicroProto::PropertyBase* prop = nullptr;
-    for (MicroProto::PropertyBase* p = MicroProto::PropertyBase::head; p; p = p->next) {
-        if (strcmp(p->name, "test_uint8") == 0) {
+    for (uint8_t i = 0; i < MicroProto::PropertyBase::count; i++) {
+        MicroProto::PropertyBase* p = MicroProto::PropertyBase::byId[i];
+        if (p && strcmp(p->name, "test_uint8") == 0) {
             prop = p;
             break;
         }
@@ -101,7 +102,9 @@ void test_property_metadata(void) {
 
 void test_property_type_id(void) {
     // Find properties and check type IDs
-    for (MicroProto::PropertyBase* p = MicroProto::PropertyBase::head; p; p = p->next) {
+    for (uint8_t i = 0; i < MicroProto::PropertyBase::count; i++) {
+        MicroProto::PropertyBase* p = MicroProto::PropertyBase::byId[i];
+        if (!p) continue;
         if (strcmp(p->name, "test_uint8") == 0) {
             TEST_ASSERT_EQUAL_UINT8(MicroProto::TYPE_UINT8, p->getTypeId());
         }

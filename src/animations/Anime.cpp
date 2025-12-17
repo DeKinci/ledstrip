@@ -14,7 +14,11 @@ std::array<CRGB, LED_LIMIT> leds = {};
 size_t currentLeds = 0;
 
 // Persistent property with automatic debounced saving (1 second default)
-PROPERTY_LOCAL(brightness, uint8_t, 255, true);  // persistent=true
+MicroProto::Property<uint8_t> brightness("brightness", 255, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<uint8_t>().min(0).max(255),
+    "LED output brightness",  // description
+    MicroProto::UIHints(),    // UI hints (default)
+    true);                    // persistent=true
 
 std::vector<String> shaders = {};
 std::vector<LuaAnimation *> loadedAnimations = {};

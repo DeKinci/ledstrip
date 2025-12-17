@@ -21,6 +21,7 @@ public:
     virtual void onPropertyUpdate(uint8_t propertyId, const void* value, size_t size) = 0;
     virtual void onError(const ErrorMessage& error) {}
     virtual void onPing(uint32_t payload) {}
+    virtual void onConstraintViolation(uint8_t propertyId, ErrorCode code) {}
 };
 
 /**

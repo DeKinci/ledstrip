@@ -75,21 +75,15 @@ bool MessageRouter::processPropertyUpdateShort(ReadBuffer& buf, bool batched) {
             return false;
         }
 
-        union {
-            bool b;
-            int8_t i8;
-            uint8_t u8;
-            int32_t i32;
-            float f32;
-        } value;
-
-        size_t size = prop->getSize();
-        if (!TypeCodec::decode(buf, prop->getTypeId(), &value, size)) {
+        // Decode directly into property (handles basic + container types)
+        if (!TypeCodec::decodeProperty(buf, prop)) {
             Serial.printf("[MicroProto] Failed to decode value for property %d\n", propId);
             return false;
         }
 
-        _handler->onPropertyUpdate(propId, &value, size);
+        // For containers, validation happens during setData
+        // For basic types, we already set the data, so just notify
+        _handler->onPropertyUpdate(propId, prop->getData(), prop->getSize());
     }
 
     return buf.ok();
@@ -133,21 +127,15 @@ bool MessageRouter::processPropertyUpdateLong(ReadBuffer& buf, bool batched) {
             return false;
         }
 
-        union {
-            bool b;
-            int8_t i8;
-            uint8_t u8;
-            int32_t i32;
-            float f32;
-        } value;
-
-        size_t size = prop->getSize();
-        if (!TypeCodec::decode(buf, prop->getTypeId(), &value, size)) {
+        // Decode directly into property (handles basic + container types)
+        if (!TypeCodec::decodeProperty(buf, prop)) {
             Serial.printf("[MicroProto] Failed to decode value for property %d (long)\n", propId);
             return false;
         }
 
-        _handler->onPropertyUpdate(static_cast<uint8_t>(propId), &value, size);
+        // For containers, validation happens during setData
+        // For basic types, we already set the data, so just notify
+        _handler->onPropertyUpdate(static_cast<uint8_t>(propId), prop->getData(), prop->getSize());
     }
 
     return buf.ok();
@@ -176,10 +164,7 @@ bool MessageRouter::processPing(ReadBuffer& buf) {
 }
 
 PropertyBase* MessageRouter::findProperty(uint8_t id) {
-    for (PropertyBase* p = PropertyBase::head; p; p = p->next) {
-        if (p->id == id) return p;
-    }
-    return nullptr;
+    return PropertyBase::find(id);
 }
 
 } // namespace MicroProto
