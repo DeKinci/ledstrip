@@ -20,6 +20,7 @@ namespace Anime
     String getCurrent();
     size_t getCurrentLeds();
     void setCurrentLeds(size_t currentLeds);
+    size_t getShaderCount();
 
     uint8_t getBrightness();
     void setBrightness(uint8_t brightness);

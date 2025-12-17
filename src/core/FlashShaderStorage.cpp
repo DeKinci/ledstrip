@@ -1,5 +1,4 @@
 #include "FlashShaderStorage.h"
-#include "web/SocketController.h"
 
 #include <SPIFFS.h>
 #include <FS.h>
@@ -24,9 +23,7 @@ void FlashShaderStorage::nuke() {
 }
 
 bool FlashShaderStorage::deleteShader(const String& name) {
-    bool result = SPIFFS.remove(shaderFolderFile(name));
-    SocketController::animationRemoved(name);
-    return result;
+    return SPIFFS.remove(shaderFolderFile(name));
 }
 
 CallResult<std::vector<String>> FlashShaderStorage::listShaders() const {

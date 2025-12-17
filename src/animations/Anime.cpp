@@ -3,9 +3,9 @@
 #include <Arduino.h>
 #include <esp_sleep.h>
 
-#include "web/SocketController.h"
 #include "PropertySystem.h"
 #include "Property.h"
+#include "ListProperty.h"
 
 namespace {
 
@@ -16,9 +16,34 @@ size_t currentLeds = 0;
 // Persistent property with automatic debounced saving (1 second default)
 MicroProto::Property<uint8_t> brightness("brightness", 255, MicroProto::PropertyLevel::LOCAL,
     MicroProto::Constraints<uint8_t>().min(0).max(255),
-    "LED output brightness",  // description
-    MicroProto::UIHints(),    // UI hints (default)
-    true);                    // persistent=true
+    "LED output brightness",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::AMBER).setIcon("💡").setUnit("%"),
+    true);  // persistent
+
+// Animation selection (index into shader list)
+MicroProto::Property<uint8_t> shaderIndex("shaderIndex", 0, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<uint8_t>().min(0).max(255),
+    "Current animation index",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::CYAN).setIcon("🎬"),
+    true);  // persistent
+
+// Active LED count
+MicroProto::Property<uint8_t> ledCount("ledCount", LED_LIMIT, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<uint8_t>().min(1).max(LED_LIMIT),
+    "Number of active LEDs",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::LIME).setIcon("💡"),
+    true);  // persistent
+
+// Atmospheric fade toggle
+MicroProto::Property<bool> atmosphericFadeProp("atmosphericFade", false, MicroProto::PropertyLevel::LOCAL,
+    "Gradual brightness fade (kerosene lamp effect)",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::ORANGE).setIcon("🕯️"));
+
+// LED RGB preview stream (3 bytes per LED: R, G, B, R, G, B, ...)
+MicroProto::ListProperty<uint8_t, LED_LIMIT * 3> ledPreview("ledPreview", {}, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::ListConstraints<uint8_t>().maxLength(LED_LIMIT * 3),
+    "Live LED preview RGB values",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::PINK).setIcon("🌈"));
 
 std::vector<String> shaders = {};
 std::vector<LuaAnimation *> loadedAnimations = {};
@@ -32,8 +57,6 @@ bool toReload = false;
 uint32_t animationTime = 0;
 uint32_t animationIteration = 0;
 float deltaTime = 0;
-
-uint32_t lastSocketSendMillist = 0;
 
 // Power saving
 uint32_t lastNonBlackTime = 0;
@@ -84,16 +107,18 @@ void updateAtmosphericFade() {
     }
 }
 
-void sendLedsToSocket() {
-    // Temporarily disabled to test network reliability
-    return;
+void updateLedPreview() {
+    static uint32_t lastUpdate = 0;
+    if (millis() - lastUpdate < 100) return;  // 10 Hz
+    lastUpdate = millis();
 
-    if (millis() - lastSocketSendMillist < 100) {
-        return;
+    // Update preview with current LED RGB values
+    ledPreview.resize(currentLeds * 3);
+    for (size_t i = 0; i < currentLeds; i++) {
+        ledPreview.set(i * 3, leds[i].r);
+        ledPreview.set(i * 3 + 1, leds[i].g);
+        ledPreview.set(i * 3 + 2, leds[i].b);
     }
-
-    SocketController::updateLedVals(leds.data(), currentLeds);
-    lastSocketSendMillist = millis();
 }
 
 void setCurrentAnimation(LuaAnimation *animation) {
@@ -107,8 +132,7 @@ void setCurrentAnimation(LuaAnimation *animation) {
     }
 
     ShaderStorage::get().saveLastShader(animationName);
-
-    SocketController::animationSelected(animationName);
+    // Animation change auto-broadcasts via MicroProto shaderIndex property
 }
 
 CallResult<LuaAnimation *> loadCached(String &shaderName) {
@@ -227,8 +251,32 @@ CallResult<void *> connect() {
     // Record startup time for grace period
     startupTime = millis();
 
-    int cl = ShaderStorage::get().getProperty("activeLeds", String(LED_LIMIT)).toInt();
-    currentLeds = std::min(200, std::max(0, cl));
+    // Wire property change callbacks
+    shaderIndex.onChangeTyped([](uint8_t, uint8_t newIdx) {
+        if (newIdx < shaders.size()) {
+            setAnimationByIndex(newIdx);
+        }
+    });
+
+    ledCount.onChangeTyped([](uint8_t, uint8_t newCount) {
+        currentLeds = newCount;
+        for (size_t i = newCount; i < LED_LIMIT; i++) {
+            leds[i] = CRGB(0, 0, 0);
+        }
+    });
+
+    atmosphericFadeProp.onChangeTyped([](bool, bool enabled) {
+        atmosphericFadeEnabled = enabled;
+        if (enabled) {
+            lastFadeUpdate = millis();
+            Serial.println("[Anime] Atmospheric fade enabled");
+        } else {
+            Serial.println("[Anime] Atmospheric fade disabled");
+        }
+    });
+
+    // Load initial LED count from property (handles persistence)
+    currentLeds = ledCount.get();
 
     CallResult<void *> loadResult = reload();
     if (loadResult.hasError()) {
@@ -314,7 +362,7 @@ CallResult<void *> draw() {
         lastNonBlackTime = currentTime;
     }
 
-    sendLedsToSocket();
+    updateLedPreview();
     lastUpdate = millis();
 
     return CallResult<void *>(nullptr, 200);
@@ -324,12 +372,13 @@ void scheduleReload() { toReload = true; }
 
 size_t getCurrentLeds() { return currentLeds; }
 
-void setCurrentLeds(size_t acurrentLeds) {
-    currentLeds = acurrentLeds;
-    for (int i = currentLeds; i < LED_LIMIT; i++) {
-        leds[i] = CRGB(0, 0, 0);
-    }
-    ShaderStorage::get().saveProperty("activeLeds", String(currentLeds));
+void setCurrentLeds(size_t newCount) {
+    // Use property which triggers callback and handles persistence
+    ledCount = static_cast<uint8_t>(newCount);
+}
+
+size_t getShaderCount() {
+    return shaders.size();
 }
 
 uint8_t getBrightness() {

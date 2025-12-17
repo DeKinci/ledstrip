@@ -39,6 +39,14 @@ from integration.test_microproto import (
     test_constraint_validation,
     test_container_updates,
 )
+from integration.test_led_api import (
+    test_shader_list,
+    test_shader_crud,
+    test_animation_status,
+    test_ble_scan,
+    test_ble_known_devices,
+    test_ble_connected,
+)
 
 
 def run_test_suite(ip: str) -> List[TestResult]:
@@ -70,6 +78,16 @@ def run_test_suite(ip: str) -> List[TestResult]:
     results.append(test_container_updates(ip))
     results.append(test_microproto_stress(ip, duration=5))
     results.append(test_microproto_reconnect(ip, count=5))
+
+    # LED API Tests
+    results.append(test_shader_list(ip))
+    results.append(test_shader_crud(ip))
+    results.append(test_animation_status(ip))
+
+    # BLE API Tests
+    results.append(test_ble_scan(ip))
+    results.append(test_ble_known_devices(ip))
+    results.append(test_ble_connected(ip))
 
     return results
 

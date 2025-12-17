@@ -396,6 +396,8 @@ public:
         UIHints uiHints = UIHints()
     );
 
+    virtual ~PropertyBase() = default;
+
     // Virtual interface for type-erased operations
     virtual uint8_t getTypeId() const = 0;
     virtual size_t getSize() const = 0;

@@ -1,6 +1,5 @@
 #include "ShaderStorage.h"
 #include "FlashShaderStorage.h"
-#include "web/SocketController.h"
 
 ShaderStorage* ShaderStorage::aStorage = nullptr;
 
@@ -19,11 +18,6 @@ CallResult<String> ShaderStorage::getShader(const String& name) const {
 
 CallResult<void*> ShaderStorage::storeShader(const String& name, const String& code) {
     CallResult<void*> result = writeFile(shaderFolderFile(name), code);
-
-    if (result.hasError()) {
-        return result;
-    }
-    SocketController::animationAdded(name);
     return result;
 }
 
