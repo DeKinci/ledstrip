@@ -37,7 +37,8 @@ MicroProto::Property<uint8_t> ledCount("ledCount", LED_LIMIT, MicroProto::Proper
 // Atmospheric fade toggle
 MicroProto::Property<bool> atmosphericFadeProp("atmosphericFade", false, MicroProto::PropertyLevel::LOCAL,
     "Gradual brightness fade (kerosene lamp effect)",
-    MicroProto::UIHints().setColor(MicroProto::UIColor::ORANGE).setIcon("🕯️"));
+    MicroProto::UIHints().setColor(MicroProto::UIColor::ORANGE).setIcon("🕯️"),
+    true);  // persistent
 
 // LED RGB preview stream (3 bytes per LED: R, G, B, R, G, B, ...)
 MicroProto::ListProperty<uint8_t, LED_LIMIT * 3> ledPreview("ledPreview", {}, MicroProto::PropertyLevel::LOCAL,

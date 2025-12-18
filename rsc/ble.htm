@@ -34,9 +34,18 @@
 
                 <!-- Scan Results -->
                 <div x-show="bleScanResults.length > 0" class="mb-4">
-                    <h3 class="font-semibold mb-3 text-lg">Found Devices:</h3>
+                    <div class="flex items-center gap-2 mb-3">
+                        <h3 class="font-semibold text-lg">Found Devices:</h3>
+                        <button @click="showUnnamed = !showUnnamed"
+                                class="btn btn-xs btn-ghost"
+                                :class="showUnnamed ? 'btn-active' : ''"
+                                :title="showUnnamed ? 'Hide unnamed devices' : 'Show unnamed devices'">
+                            <span x-text="showUnnamed ? '👁' : '👁‍🗨'"></span>
+                            <span x-show="hiddenDeviceCount() > 0" class="text-xs text-gray-500" x-text="'+' + hiddenDeviceCount()"></span>
+                        </button>
+                    </div>
                     <ul class="flex flex-col gap-3">
-                        <template x-for="device in bleScanResults" :key="device.address">
+                        <template x-for="device in visibleScanResults()" :key="device.address">
                             <li class="p-4 rounded-lg border-2 border-base-300 flex justify-between items-center hover:border-primary transition">
                                 <div class="flex items-center gap-3">
                                     <span class="text-2xl" x-text="getDeviceIcon(device.icon)"></span>
@@ -53,6 +62,9 @@
                                 </button>
                             </li>
                         </template>
+                        <li x-show="visibleScanResults().length === 0 && bleScanResults.length > 0" class="text-center text-gray-500 py-4">
+                            <p>All <span x-text="bleScanResults.length"></span> devices are unnamed. Click the eye button to show them.</p>
+                        </li>
                     </ul>
                 </div>
 
@@ -152,6 +164,7 @@
                 bleKnownDevices: [],
                 bleConnectedDevices: [],
                 blePollInterval: null,
+                showUnnamed: false,
 
                 scanBle() {
                     this.bleScanning = true;
@@ -250,6 +263,17 @@
                         'generic': '📱'
                     };
                     return icons[icon] || icons['generic'];
+                },
+
+                visibleScanResults() {
+                    if (this.showUnnamed) {
+                        return this.bleScanResults;
+                    }
+                    return this.bleScanResults.filter(d => d.name && d.name.trim() !== '');
+                },
+
+                hiddenDeviceCount() {
+                    return this.bleScanResults.filter(d => !d.name || d.name.trim() === '').length;
                 },
 
                 startBlePoll() {

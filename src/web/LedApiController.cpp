@@ -118,11 +118,17 @@ void registerRoutes(HttpDispatcher& dispatcher) {
 
     // GET /api/ble/scan/results - Get scan results
     dispatcher.onGet("/api/ble/scan/results", [](HttpRequest& req) {
+        bool scanning = BleDeviceManager::isScanning();
+        const auto& results = BleDeviceManager::getLastScanResults();
+        size_t count = BleDeviceManager::getLastScanResultCount();
+        Serial.printf("[API] scan/results: scanning=%d, devices=%d\n", scanning, count);
+
         JsonDocument doc;
-        doc["scanning"] = BleDeviceManager::isScanning();
+        doc["scanning"] = scanning;
         JsonArray devices = doc["devices"].to<JsonArray>();
 
-        for (const auto& device : BleDeviceManager::getLastScanResults()) {
+        for (const auto& device : results) {
+            if (!device.valid) continue;
             JsonObject obj = devices.add<JsonObject>();
             obj["address"] = device.address;
             obj["name"] = device.name;
@@ -138,6 +144,7 @@ void registerRoutes(HttpDispatcher& dispatcher) {
         JsonArray devices = doc["devices"].to<JsonArray>();
 
         for (const auto& device : BleDeviceManager::getKnownDevices()) {
+            if (!device.valid) continue;
             JsonObject obj = devices.add<JsonObject>();
             obj["address"] = device.address;
             obj["name"] = device.name;
@@ -154,17 +161,16 @@ void registerRoutes(HttpDispatcher& dispatcher) {
             return HttpResponse::json("{\"error\":\"Invalid JSON\"}", 400);
         }
 
-        String address = doc["address"].as<String>();
-        String name = doc["name"] | "";
-        String icon = doc["icon"] | "generic";
+        const char* address = doc["address"] | "";
+        const char* name = doc["name"] | "";
+        const char* icon = doc["icon"] | "generic";
         bool autoConnect = doc["autoConnect"] | true;
 
-        if (address.isEmpty()) {
+        if (address[0] == '\0') {
             return HttpResponse::json("{\"error\":\"Missing address\"}", 400);
         }
 
         if (BleDeviceManager::addKnownDevice(address, name, icon, autoConnect)) {
-            BleDeviceManager::saveKnownDevices();
             return HttpResponse::json("{\"success\":true}");
         } else {
             return HttpResponse::json("{\"error\":\"Failed to add device\"}", 500);
@@ -175,8 +181,7 @@ void registerRoutes(HttpDispatcher& dispatcher) {
     dispatcher.onDelete("/api/ble/known/{addr}", [](HttpRequest& req) {
         String address = req.pathParam("addr").toString();
 
-        if (BleDeviceManager::removeKnownDevice(address)) {
-            BleDeviceManager::saveKnownDevices();
+        if (BleDeviceManager::removeKnownDevice(address.c_str())) {
             return HttpResponse::json("{\"success\":true}");
         } else {
             return HttpResponse::json("{\"error\":\"Device not found\"}", 404);
@@ -188,11 +193,12 @@ void registerRoutes(HttpDispatcher& dispatcher) {
         JsonDocument doc;
         JsonArray devices = doc["devices"].to<JsonArray>();
 
-        for (const auto* conn : BleDeviceManager::getConnectedDevices()) {
+        for (const auto& conn : BleDeviceManager::getConnectedDevices()) {
+            if (!conn.valid) continue;
             JsonObject obj = devices.add<JsonObject>();
-            obj["address"] = conn->device.address;
-            obj["name"] = conn->device.name;
-            obj["icon"] = conn->device.icon;
+            obj["address"] = conn.device.address;
+            obj["name"] = conn.device.name;
+            obj["icon"] = conn.device.icon;
         }
         return HttpResponse::json(doc);
     });
@@ -201,7 +207,7 @@ void registerRoutes(HttpDispatcher& dispatcher) {
     dispatcher.onPost("/api/ble/connect/{addr}", [](HttpRequest& req) {
         String address = req.pathParam("addr").toString();
 
-        if (BleDeviceManager::connectToDevice(address)) {
+        if (BleDeviceManager::connectToDevice(address.c_str())) {
             return HttpResponse::json("{\"success\":true}");
         } else {
             return HttpResponse::json("{\"error\":\"Failed to connect\"}", 500);
@@ -212,7 +218,7 @@ void registerRoutes(HttpDispatcher& dispatcher) {
     dispatcher.onPost("/api/ble/disconnect/{addr}", [](HttpRequest& req) {
         String address = req.pathParam("addr").toString();
 
-        if (BleDeviceManager::disconnectDevice(address)) {
+        if (BleDeviceManager::disconnectDevice(address.c_str())) {
             return HttpResponse::json("{\"success\":true}");
         } else {
             return HttpResponse::json("{\"error\":\"Device not connected\"}", 404);

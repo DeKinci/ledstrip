@@ -3,26 +3,19 @@
 
 #include <NimBLEDevice.h>
 
-class BleButton : public NimBLEClientCallbacks {
+class BleButton {
    public:
-    // Legacy constructor - connects to a device by address
-    BleButton(NimBLEAddress foundAddr);
+    // Default constructor for static pool
+    BleButton() = default;
 
-    // New constructor - uses an already connected client
+    // Constructor - uses an already connected client from BleDeviceManager
     BleButton(NimBLEClient* client);
 
     void loop();
 
-    void onConnect(NimBLEClient* client) override;
-    void onAuthenticationComplete(NimBLEConnInfo& connInfo) override;
-    void onDisconnect(NimBLEClient* client, int reason) override;
-
    private:
-    void initialize();
-
     NimBLEClient* connectedClient = nullptr;
     bool shouldSubscribe = false;
-    bool managedClient = false;  // true if we created the client (legacy mode)
 };
 
 #endif

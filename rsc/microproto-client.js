@@ -197,7 +197,6 @@ class MicroProtoClient {
         view.setUint8(0, MicroProtoClient.OPCODES.PING);
         view.setUint32(1, payload, true);
 
-        this._log('Sending heartbeat PING:', payload);
         this.ws.send(buf);
 
         // Set timeout for pong response
@@ -683,7 +682,6 @@ class MicroProtoClient {
             this._heartbeatTimeoutTimer = null;
         }
         this._lastPongTime = Date.now();
-        this._log('PONG received - connection alive');
     }
 
     // Value encoding/decoding

@@ -10,9 +10,11 @@
 #include "core/ShaderStorage.h"
 #include "web/LedApiController.h"
 #include "input/EncoderInput.hpp"
+#include "ble/BleDeviceManager.hpp"
 
 #include "rsc/w_index_htm.h"
 #include "rsc/w_proto_htm.h"
+#include "rsc/w_ble_htm.h"
 #include "rsc/w_microproto_client_js.h"
 
 HttpServer http(80);
@@ -26,6 +28,10 @@ void setup() {
     delay(600);  // crucial for wifi
     Serial.println("\n\n=== LED Strip Controller ===");
     Serial.printf("1. Boot: Free heap: %lu bytes\n", ESP.getFreeHeap());
+
+    // Initialize BLE FIRST (before WiFi) - they share the radio
+    BleDeviceManager::init();
+    Serial.printf("2. After BLE init: Free heap: %lu bytes\n", ESP.getFreeHeap());
 
     // Initialize property system (includes loading persistent values)
     MicroProto::PropertySystem::init();
@@ -72,6 +78,11 @@ void setup() {
         return HttpResponse::html(proto_htm, proto_htm_len);
     });
 
+    // BLE device management page
+    httpDispatcher.onGet("/ble", [](HttpRequest& req) {
+        return HttpResponse::html(ble_htm, ble_htm_len);
+    });
+
     httpDispatcher.onGet("/js/proto.js", [](HttpRequest& req) {
         return HttpResponse()
             .status(200)
@@ -116,6 +127,10 @@ void loop() {
 
     // Physical input
     EncoderInput::loop();
+    yield();
+
+    // BLE device management
+    BleDeviceManager::loop();
     yield();
 
     // LED animation

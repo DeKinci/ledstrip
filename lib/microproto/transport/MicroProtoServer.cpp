@@ -200,8 +200,6 @@ void MicroProtoServer::sendPong(uint8_t clientNum, uint32_t payload) {
     wb.writeByte(header.encode());
     wb.writeUint32(payload);
 
-    Serial.printf("[MicroProto] Sending PONG to client %u, payload=%lu\n",
-                  clientNum, static_cast<unsigned long>(payload));
     _ws.sendBIN(clientNum, buf, wb.position());
 }
 

@@ -158,7 +158,6 @@ bool MessageRouter::processPing(ReadBuffer& buf) {
         payload = buf.readUint32();
     }
 
-    Serial.printf("[MicroProto] PING received, payload=%lu\n", payload);
     _handler->onPing(payload);
     return true;
 }

@@ -1,94 +1,95 @@
 #include "BleButton.hpp"
 #include "animations/Anime.h"
+#include <Logger.h>
 
-// Legacy constructor - connects to a device by address
-BleButton::BleButton(NimBLEAddress foundAddr) : managedClient(true) {
-    NimBLEClient* client = NimBLEDevice::getDisconnectedClient();
-    if (!client) {
-        client = NimBLEDevice::createClient();
-        if (!client) {
-            Serial.println("Failed to create client");
-            return;
-        }
-        client->setConnectionParams(12, 12, 0, 150);
-        client->setConnectTimeout(5 * 1000);
-    }
+#define TAG "BTN"
 
-    client->setClientCallbacks(this, false);
-    if (!client->connect(foundAddr, false, true, true)) {
-        Serial.println("Connect failed");
-        NimBLEDevice::deleteClient(client);
-    }
+namespace {
+// Deferred action flag - set from BLE task callback, processed in loop()
+// Using int8_t: 0 = none, 1 = next, -1 = previous
+volatile int8_t pendingAction = 0;
 }
 
-// New constructor - uses an already connected client
-BleButton::BleButton(NimBLEClient* client) : connectedClient(client), managedClient(false) {
+// Constructor - uses an already connected client from BleDeviceManager
+BleButton::BleButton(NimBLEClient* client) : connectedClient(client) {
     if (client && client->isConnected()) {
         // Client is already connected, just need to subscribe
         shouldSubscribe = true;
     }
 }
 
-void BleButton::onConnect(NimBLEClient* client) {
-    Serial.printf("Connected: %s\n", client->getPeerAddress().toString().c_str());
-    client->secureConnection(true);
-    connectedClient = client;
-}
-
-void BleButton::onAuthenticationComplete(NimBLEConnInfo& connInfo) {
-    Serial.printf("Auth: %d encryption %d\n", connInfo.isBonded(), connInfo.isEncrypted());
-    shouldSubscribe = true;
-}
-
-void BleButton::onDisconnect(NimBLEClient* client, int reason) {
-    Serial.printf("Disconnected (%s): reason = %d\n", client->getPeerAddress().toString().c_str(), reason);
-    connectedClient = nullptr;
-    shouldSubscribe = false;
-}
-
 String charId(NimBLERemoteCharacteristic* ch) {
     return "uuid: " + String(ch->getUUID().toString().c_str()) + " handle: 0x" + String(ch->getHandle(), HEX);
 }
 
-static const NimBLEUUID CHAR_UUID(uint16_t(0x2a4d));
-static const NimBLEUUID SERVICE_UUID(uint16_t(0x1812));
+static const NimBLEUUID SERVICE_UUID(uint16_t(0x1812));  // HID service
 
 void subscribeToClicks(NimBLERemoteService* service) {
-    Serial.printf("Subscribing to clicks for service: %s\n", service->getUUID().toString().c_str());
-    NimBLERemoteCharacteristic* inputChar = service->getCharacteristic(CHAR_UUID);
-    for (auto* c : service->getCharacteristics()) {
+    LOG_INFO(TAG, "Subscribing to service: %s", service->getUUID().toString().c_str());
+    const auto& chars = service->getCharacteristics(true);  // true = refresh/discover from device
+    LOG_INFO(TAG, "Found %d characteristics", chars.size());
+    for (auto* c : chars) {
         if (!c->canNotify()) {
-            Serial.println("Input report characteristic not notifiable");
+            LOG_DEBUG(TAG, "Characteristic not notifiable");
         } else {
             if (c->subscribe(
                     true,
                     [](NimBLERemoteCharacteristic* c, uint8_t* data, size_t len, bool notify) {
+                        // Format HID data as hex string
+                        char hexBuf[64];
+                        size_t pos = 0;
+                        for (size_t i = 0; i < len && pos < sizeof(hexBuf) - 4; i++) {
+                            pos += snprintf(hexBuf + pos, sizeof(hexBuf) - pos, " %02X", data[i]);
+                        }
+                        hexBuf[pos] = '\0';
+                        LOG_DEBUG("HID", "len=%d data:%s", len, hexBuf);
+
                         if (len > 0) {
-                            if (data[0] == 0x2) {
-                                Serial.println("Down!");
-                            } else if (data[0] == 0) {
-                                Serial.println("Up!");
-                                Anime::nextAnimation();
+                            // Most HID buttons: non-zero = press, zero = release
+                            bool anyNonZero = false;
+                            for (size_t i = 0; i < len; i++) {
+                                if (data[i] != 0) anyNonZero = true;
+                            }
+
+                            if (anyNonZero) {
+                                LOG_INFO("BTN", "Press");
                             } else {
-                                Serial.println("Other!");
+                                LOG_INFO("BTN", "Release");
+                                // Queue action for processing in main loop
+                                pendingAction = 1;
                             }
                         }
                     },
                     false)) {
-                Serial.printf("Subscribed to %s\n", charId(c).c_str());
+                LOG_INFO(TAG, "Subscribed to %s", charId(c).c_str());
             } else {
-                Serial.println("Subscribing failed");
+                LOG_WARN(TAG, "Subscribe failed");
             }
         }
     }
 }
 
 void BleButton::loop() {
-    if (shouldSubscribe) {
+    if (shouldSubscribe && connectedClient != nullptr) {
         shouldSubscribe = false;
+        LOG_INFO(TAG, "Getting HID service...");
         NimBLERemoteService* pService = connectedClient->getService(SERVICE_UUID);
         if (pService != nullptr) {
+            LOG_INFO(TAG, "Got service, subscribing...");
             subscribeToClicks(pService);
+        } else {
+            LOG_WARN(TAG, "HID service not found!");
+        }
+    }
+
+    // Process deferred button actions (set from BLE task callback)
+    int8_t action = pendingAction;
+    if (action != 0) {
+        pendingAction = 0;
+        if (action > 0) {
+            Anime::nextAnimation();
+        } else {
+            Anime::previousAnimation();
         }
     }
 }
