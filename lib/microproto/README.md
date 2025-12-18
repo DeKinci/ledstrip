@@ -1,5 +1,7 @@
 # MicroProto Protocol Specification v1.0
 
+> **See also:** [Implementation.md](Implementation.md) for target architecture and refactoring roadmap.
+
 A binary, space-efficient property-based protocol for distributed embedded systems with support for properties, RPC, and dynamic schema management.
 
 ## Design Goals
