@@ -1,6 +1,7 @@
 // LED Strip Controller - HTTP + MicroProto + Anime
 #include <Arduino.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <HttpServer.h>
 #include <WiFiMan.h>
 #include <PropertySystem.h>
@@ -100,6 +101,11 @@ void setup() {
     wifiManager.onConnected([](const String& ssid) {
         Serial.printf("Connected to %s\n", ssid.c_str());
         WiFi.setSleep(false);  // Low latency mode
+
+        // Start mDNS for led.local
+        if (MDNS.begin("led")) {
+            Serial.println("mDNS: led.local");
+        }
     });
 
     // Start HTTP server (works in both AP and STA mode)

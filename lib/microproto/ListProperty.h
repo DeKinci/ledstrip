@@ -3,6 +3,7 @@
 
 #include "PropertyBase.h"
 #include "TypeTraits.h"
+#include "wire/TypeCodec.h"
 #include <array>
 #include <string.h>
 
@@ -437,6 +438,14 @@ public:
         }
 
         return true;
+    }
+
+    // Schema encoding using compile-time type info
+    bool encodeTypeDefinition(WriteBuffer& buf) const override {
+        // ListProperty is LIST type - use MicroList encoding with same template params
+        // We encode as LIST even though internally we use std::array
+        return SchemaTypeEncoder::encode<T, MaxN, MaxN>(
+            buf, getElementConstraints(), getContainerConstraints());
     }
 
 private:

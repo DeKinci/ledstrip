@@ -127,6 +127,79 @@ bool PropertyStorage::load(PropertyBase* property) {
     }
 }
 
+bool PropertyStorage::saveRaw(uint8_t property_id, const void* data, size_t size) {
+    if (!data || size == 0) return false;
+    if (!initialized) init();
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "Failed to open NVS: %s", esp_err_to_name(err));
+        return false;
+    }
+
+    char key[16];
+    makeKey(property_id, key, sizeof(key));
+
+    err = nvs_set_blob(handle, key, data, size);
+    if (err != ESP_OK) {
+        LOG_ERROR(TAG, "Failed to save raw property %d: %s", property_id, esp_err_to_name(err));
+        nvs_close(handle);
+        return false;
+    }
+
+    err = nvs_commit(handle);
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        LOG_INFO(TAG, "Saved raw property %d (%zu bytes)", property_id, size);
+        return true;
+    } else {
+        LOG_ERROR(TAG, "Failed to commit raw property %d: %s", property_id, esp_err_to_name(err));
+        return false;
+    }
+}
+
+size_t PropertyStorage::loadRaw(uint8_t property_id, void* buffer, size_t bufferSize) {
+    if (!buffer || bufferSize == 0) return 0;
+    if (!initialized) init();
+
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (err != ESP_OK) {
+        LOG_DEBUG(TAG, "NVS namespace not found (first boot?)");
+        return 0;
+    }
+
+    char key[16];
+    makeKey(property_id, key, sizeof(key));
+
+    // Get size first
+    size_t size = 0;
+    err = nvs_get_blob(handle, key, nullptr, &size);
+    if (err != ESP_OK || size == 0) {
+        nvs_close(handle);
+        LOG_DEBUG(TAG, "Raw property %d not found in storage", property_id);
+        return 0;
+    }
+
+    // Limit to buffer size
+    if (size > bufferSize) {
+        size = bufferSize;
+    }
+
+    err = nvs_get_blob(handle, key, buffer, &size);
+    nvs_close(handle);
+
+    if (err == ESP_OK) {
+        LOG_INFO(TAG, "Loaded raw property %d (%zu bytes)", property_id, size);
+        return size;
+    } else {
+        LOG_ERROR(TAG, "Failed to load raw property %d: %s", property_id, esp_err_to_name(err));
+        return 0;
+    }
+}
+
 bool PropertyStorage::erase(PropertyBase* property) {
     if (!property) return false;
     if (!initialized) init();

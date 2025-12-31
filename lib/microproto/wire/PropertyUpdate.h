@@ -11,35 +11,53 @@ namespace MicroProto {
 /**
  * PropertyUpdate - Encode/decode PROPERTY_UPDATE messages
  *
- * Wire format (PROPERTY_UPDATE_SHORT, non-batched):
- *   u8 operation_header (opcode=0x1, flags=0, batch=0)
- *   u8 property_id
- *   u8 update_flags
- *   [optional fields based on flags]
- *   bytes value
+ * Wire format (MVP spec):
+ *   u8 operation_header { opcode: 0x1, flags: bit0=batch, bit1=has_timestamp }
+ *   [u8 batch_count]         // If batch=1 (count-1, so 0 means 1 item)
+ *   [varint timestamp]       // If has_timestamp=1 (once for entire batch)
+ *
+ *   // For each property update:
+ *   propid property_id       // 1-2 bytes (0-127 = 1 byte, 128-32767 = 2 bytes)
+ *   [varint version]         // If property.level != LOCAL
+ *   [varint source_node_id]  // If property.level != LOCAL
+ *   bytes value              // Encoded according to property's type
+ *
+ * Note: For MVP, all properties are LOCAL (no version/source_node_id).
  */
 class PropertyUpdate {
 public:
     /**
-     * Encode a single property update (SHORT format, u8 ID)
+     * Encode a single property update
      *
      * @param buf WriteBuffer to write to
      * @param prop Property to encode
      * @return true if successful
      */
-    static bool encodeShort(WriteBuffer& buf, const PropertyBase* prop) {
-        // Operation header: opcode=1 (PROPERTY_UPDATE_SHORT), flags=0, batch=0
-        OpHeader header(OpCode::PROPERTY_UPDATE_SHORT);
-        if (!buf.writeByte(header.encode())) return false;
+    static bool encode(WriteBuffer& buf, const PropertyBase* prop) {
+        // Operation header: opcode=1 (PROPERTY_UPDATE), flags=0
+        if (!buf.writeByte(encodeOpHeader(OpCode::PROPERTY_UPDATE, 0))) return false;
 
-        // Property ID (u8)
-        if (!buf.writeByte(prop->id)) return false;
+        // Property ID (propid encoding: 1-2 bytes)
+        if (!buf.writePropId(prop->id)) return false;
 
-        // Update flags (no timestamp/version for simple updates)
-        PropertyUpdateFlags flags;
-        if (!buf.writeByte(flags.encode())) return false;
+        // Version fields (only for GROUP/GLOBAL - skipped for MVP LOCAL)
+        // For MVP: all properties are LOCAL, no version fields
 
         // Value
+        return TypeCodec::encodeProperty(buf, prop);
+    }
+
+    /**
+     * Encode a single property update with timestamp
+     */
+    static bool encodeWithTimestamp(WriteBuffer& buf, const PropertyBase* prop, uint32_t timestamp) {
+        PropertyUpdateFlags flags;
+        flags.hasTimestamp = true;
+
+        if (!buf.writeByte(encodeOpHeader(OpCode::PROPERTY_UPDATE, flags.encode()))) return false;
+        if (buf.writeVarint(timestamp) == 0) return false;
+        if (!buf.writePropId(prop->id)) return false;
+
         return TypeCodec::encodeProperty(buf, prop);
     }
 
@@ -47,38 +65,36 @@ public:
      * Encode a single property update with explicit value
      *
      * @param buf WriteBuffer to write to
-     * @param propertyId Property ID
+     * @param propertyId Property ID (0-32767)
      * @param typeId Type ID
      * @param data Pointer to value
      * @param size Size of value
      * @return true if successful
      */
-    static bool encodeShortValue(WriteBuffer& buf, uint8_t propertyId,
-                                  uint8_t typeId, const void* data, size_t size) {
-        OpHeader header(OpCode::PROPERTY_UPDATE_SHORT);
-        if (!buf.writeByte(header.encode())) return false;
-        if (!buf.writeByte(propertyId)) return false;
-
-        PropertyUpdateFlags flags;
-        if (!buf.writeByte(flags.encode())) return false;
+    static bool encodeValue(WriteBuffer& buf, uint16_t propertyId,
+                            uint8_t typeId, const void* data, size_t size) {
+        if (!buf.writeByte(encodeOpHeader(OpCode::PROPERTY_UPDATE, 0))) return false;
+        if (!buf.writePropId(propertyId)) return false;
 
         return TypeCodec::encode(buf, typeId, data, size);
     }
 
     /**
-     * Encode multiple property updates (batched SHORT format)
+     * Encode multiple property updates (batched)
      *
      * @param buf WriteBuffer to write to
      * @param props Array of property pointers
-     * @param count Number of properties
+     * @param count Number of properties (1-256)
      * @return true if successful
      */
-    static bool encodeBatchShort(WriteBuffer& buf, const PropertyBase** props, size_t count) {
+    static bool encodeBatch(WriteBuffer& buf, const PropertyBase** props, size_t count) {
         if (count == 0 || count > 256) return false;
 
         // Operation header with batch flag
-        OpHeader header(OpCode::PROPERTY_UPDATE_SHORT, 0, true);
-        if (!buf.writeByte(header.encode())) return false;
+        PropertyUpdateFlags flags;
+        flags.batch = true;
+
+        if (!buf.writeByte(encodeOpHeader(OpCode::PROPERTY_UPDATE, flags.encode()))) return false;
 
         // Batch count (value is count-1, so 0 means 1 operation)
         if (!buf.writeByte(static_cast<uint8_t>(count - 1))) return false;
@@ -86,11 +102,7 @@ public:
         // Each property
         for (size_t i = 0; i < count; i++) {
             const PropertyBase* prop = props[i];
-            if (!buf.writeByte(prop->id)) return false;
-
-            PropertyUpdateFlags flags;
-            if (!buf.writeByte(flags.encode())) return false;
-
+            if (!buf.writePropId(prop->id)) return false;
             if (!TypeCodec::encodeProperty(buf, prop)) return false;
         }
 
@@ -98,44 +110,83 @@ public:
     }
 
     /**
-     * Decode a property update message
+     * Encode multiple property updates with timestamp (batched)
+     */
+    static bool encodeBatchWithTimestamp(WriteBuffer& buf, const PropertyBase** props,
+                                          size_t count, uint32_t timestamp) {
+        if (count == 0 || count > 256) return false;
+
+        PropertyUpdateFlags flags;
+        flags.batch = true;
+        flags.hasTimestamp = true;
+
+        if (!buf.writeByte(encodeOpHeader(OpCode::PROPERTY_UPDATE, flags.encode()))) return false;
+        if (!buf.writeByte(static_cast<uint8_t>(count - 1))) return false;
+        if (buf.writeVarint(timestamp) == 0) return false;
+
+        for (size_t i = 0; i < count; i++) {
+            const PropertyBase* prop = props[i];
+            if (!buf.writePropId(prop->id)) return false;
+            if (!TypeCodec::encodeProperty(buf, prop)) return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Decode header and get batch info
      *
-     * @param buf ReadBuffer to read from
-     * @param outPropertyId Output: property ID
-     * @param outFlags Output: update flags
-     * @param outValue Output buffer for value (must be large enough)
-     * @param outValueSize Output: size of decoded value
-     * @param typeId Type ID of the property (caller must know this)
+     * @param buf ReadBuffer (assumes header byte already consumed)
+     * @param flags Decoded flags
+     * @param outBatchCount Output: number of items (1 if not batched)
+     * @param outTimestamp Output: timestamp if has_timestamp flag set
      * @return true if successful
      */
-    static bool decodeShort(ReadBuffer& buf, uint8_t& outPropertyId,
-                            PropertyUpdateFlags& outFlags,
-                            void* outValue, size_t& outValueSize,
-                            uint8_t typeId) {
-        // Read operation header
-        uint8_t headerByte = buf.readByte();
-        if (!buf.ok()) return false;
+    static bool decodeHeader(uint8_t flagBits, ReadBuffer& buf,
+                             uint8_t& outBatchCount, uint32_t& outTimestamp) {
+        PropertyUpdateFlags flags = PropertyUpdateFlags::decode(flagBits);
 
-        OpHeader header = OpHeader::decode(headerByte);
-        if (header.getOpCode() != OpCode::PROPERTY_UPDATE_SHORT) return false;
-        if (header.batch) return false;  // Use decodeBatch for batched
-
-        // Property ID
-        outPropertyId = buf.readByte();
-        if (!buf.ok()) return false;
-
-        // Flags
-        outFlags = PropertyUpdateFlags::decode(buf.readByte());
-        if (!buf.ok()) return false;
-
-        // Skip optional fields (timestamp, version) - not implemented yet
-        if (outFlags.has_timestamp) {
-            buf.skip(4);  // u32 timestamp
+        if (flags.batch) {
+            outBatchCount = buf.readByte() + 1;  // Stored as count-1
+            if (!buf.ok()) return false;
+        } else {
+            outBatchCount = 1;
         }
-        if (outFlags.has_version) {
-            buf.skip(8);  // u32 version + u32 source_node_id
+
+        if (flags.hasTimestamp) {
+            outTimestamp = buf.readVarint();
+            if (!buf.ok()) return false;
+        } else {
+            outTimestamp = 0;
         }
+
+        return true;
+    }
+
+    /**
+     * Decode a single property update item (after header)
+     *
+     * @param buf ReadBuffer
+     * @param outPropertyId Output: property ID (0-32767)
+     * @param outValue Output buffer for value (must be large enough)
+     * @param outValueSize Output: size of decoded value
+     * @param typeId Type ID of the property (caller must look up from schema)
+     * @param level Property level (determines if version fields present)
+     * @return true if successful
+     */
+    static bool decodeItem(ReadBuffer& buf, uint16_t& outPropertyId,
+                           void* outValue, size_t& outValueSize,
+                           uint8_t typeId, PropertyLevel level = PropertyLevel::LOCAL) {
+        // Property ID (propid encoding)
+        outPropertyId = buf.readPropId();
         if (!buf.ok()) return false;
+
+        // Version fields (only for GROUP/GLOBAL)
+        if (level != PropertyLevel::LOCAL) {
+            buf.readVarint();  // version
+            buf.readVarint();  // source_node_id
+            if (!buf.ok()) return false;
+        }
 
         // Value
         outValueSize = TypeCodec::typeSize(typeId);
@@ -143,30 +194,23 @@ public:
     }
 
     /**
-     * Decode header only, to determine batch status
+     * Decode a property update and apply to property registry
      *
-     * @param buf ReadBuffer (position will be advanced by 1 byte)
-     * @param outHeader Output header
-     * @param outBatchCount Output: number of items (1 if not batched)
-     * @return true if valid PROPERTY_UPDATE_SHORT
+     * @param buf ReadBuffer (positioned after header)
+     * @param outPropertyId Output: property ID that was updated
+     * @return true if property was found and updated successfully
      */
-    static bool decodeHeader(ReadBuffer& buf, OpHeader& outHeader, uint8_t& outBatchCount) {
-        uint8_t headerByte = buf.readByte();
+    static bool decodeAndApply(ReadBuffer& buf, uint16_t& outPropertyId) {
+        outPropertyId = buf.readPropId();
         if (!buf.ok()) return false;
 
-        outHeader = OpHeader::decode(headerByte);
-        if (outHeader.getOpCode() != OpCode::PROPERTY_UPDATE_SHORT &&
-            outHeader.getOpCode() != OpCode::PROPERTY_UPDATE_LONG) {
-            return false;
-        }
+        PropertyBase* prop = PropertyBase::find(static_cast<uint8_t>(outPropertyId));
+        if (!prop) return false;
 
-        if (outHeader.batch) {
-            outBatchCount = buf.readByte() + 1;  // Stored as count-1
-            return buf.ok();
-        } else {
-            outBatchCount = 1;
-            return true;
-        }
+        // For MVP: all LOCAL, no version fields
+        // TODO: Check prop->level for GROUP/GLOBAL
+
+        return TypeCodec::decodeProperty(buf, prop);
     }
 };
 

@@ -9,106 +9,136 @@ namespace MicroProto {
 /**
  * HELLO message - Connection handshake and resynchronization
  *
- * Client HELLO (request):
- *   u8 operation_header (opcode=0, flags=0, batch=0)
- *   u8 protocol_version
- *   u16 max_packet_size (little-endian)
- *   u32 device_id (little-endian)
+ * Uses is_response flag (bit0) to distinguish request/response.
  *
- * Server HELLO (response):
- *   u8 operation_header (opcode=0, flags=0, batch=0)
+ * Request (is_response=0, client -> server):
+ *   u8 operation_header { opcode: 0x0, flags: 0x0 }
  *   u8 protocol_version
- *   u16 max_packet_size (little-endian)
- *   u32 session_id (little-endian)
- *   u32 server_timestamp (little-endian)
+ *   varint max_packet_size
+ *   varint device_id
+ *
+ * Response (is_response=1, server -> client):
+ *   u8 operation_header { opcode: 0x0, flags: 0x1 }
+ *   u8 protocol_version
+ *   varint max_packet_size
+ *   varint session_id
+ *   varint server_timestamp
+ *
+ * Semantics:
+ *   Request: "I am (re)connecting. Please send me complete state."
+ *   Response: "Reset your state. Complete schema and properties follow."
  */
 
-struct HelloRequest {
+struct Hello {
+    bool isResponse = false;
     uint8_t protocolVersion = PROTOCOL_VERSION;
-    uint16_t maxPacketSize = 4096;
+    uint32_t maxPacketSize = 4096;
+
+    // Request fields (when isResponse=false)
     uint32_t deviceId = 0;
 
-    /**
-     * Encode client HELLO request
-     */
-    bool encode(WriteBuffer& buf) const {
-        OpHeader header(OpCode::HELLO);
-        if (!buf.writeByte(header.encode())) return false;
-        if (!buf.writeByte(protocolVersion)) return false;
-        if (!buf.writeUint16(maxPacketSize)) return false;
-        if (!buf.writeUint32(deviceId)) return false;
-        return true;
-    }
-
-    /**
-     * Decode client HELLO request
-     */
-    static bool decode(ReadBuffer& buf, HelloRequest& out) {
-        uint8_t headerByte = buf.readByte();
-        if (!buf.ok()) return false;
-
-        OpHeader header = OpHeader::decode(headerByte);
-        if (header.getOpCode() != OpCode::HELLO) return false;
-
-        out.protocolVersion = buf.readByte();
-        out.maxPacketSize = buf.readUint16();
-        out.deviceId = buf.readUint32();
-
-        return buf.ok();
-    }
-
-    /**
-     * Size of encoded message
-     */
-    static constexpr size_t encodedSize() {
-        return 1 + 1 + 2 + 4;  // header + version + maxPacket + deviceId
-    }
-};
-
-struct HelloResponse {
-    uint8_t protocolVersion = PROTOCOL_VERSION;
-    uint16_t maxPacketSize = 4096;
+    // Response fields (when isResponse=true)
     uint32_t sessionId = 0;
     uint32_t serverTimestamp = 0;
 
+    Hello() = default;
+
     /**
-     * Encode server HELLO response
+     * Create a client request
+     */
+    static Hello request(uint32_t deviceId, uint32_t maxPacketSize = 4096) {
+        Hello h;
+        h.isResponse = false;
+        h.deviceId = deviceId;
+        h.maxPacketSize = maxPacketSize;
+        return h;
+    }
+
+    /**
+     * Create a server response
+     */
+    static Hello response(uint32_t sessionId, uint32_t serverTimestamp, uint32_t maxPacketSize = 4096) {
+        Hello h;
+        h.isResponse = true;
+        h.sessionId = sessionId;
+        h.serverTimestamp = serverTimestamp;
+        h.maxPacketSize = maxPacketSize;
+        return h;
+    }
+
+    /**
+     * Encode HELLO message
      */
     bool encode(WriteBuffer& buf) const {
-        OpHeader header(OpCode::HELLO);
-        if (!buf.writeByte(header.encode())) return false;
+        uint8_t flags = isResponse ? Flags::IS_RESPONSE : 0;
+        if (!buf.writeByte(encodeOpHeader(OpCode::HELLO, flags))) return false;
         if (!buf.writeByte(protocolVersion)) return false;
-        if (!buf.writeUint16(maxPacketSize)) return false;
-        if (!buf.writeUint32(sessionId)) return false;
-        if (!buf.writeUint32(serverTimestamp)) return false;
+        if (buf.writeVarint(maxPacketSize) == 0) return false;
+
+        if (isResponse) {
+            if (buf.writeVarint(sessionId) == 0) return false;
+            if (buf.writeVarint(serverTimestamp) == 0) return false;
+        } else {
+            if (buf.writeVarint(deviceId) == 0) return false;
+        }
         return true;
     }
 
     /**
-     * Decode server HELLO response
+     * Decode HELLO message
+     *
+     * Note: Caller should verify protocol version matches and handle mismatch
      */
-    static bool decode(ReadBuffer& buf, HelloResponse& out) {
+    static bool decode(ReadBuffer& buf, Hello& out) {
         uint8_t headerByte = buf.readByte();
         if (!buf.ok()) return false;
 
-        OpHeader header = OpHeader::decode(headerByte);
-        if (header.getOpCode() != OpCode::HELLO) return false;
+        OpCode opcode;
+        uint8_t flags;
+        decodeOpHeader(headerByte, opcode, flags);
 
+        if (opcode != OpCode::HELLO) return false;
+
+        out.isResponse = (flags & Flags::IS_RESPONSE) != 0;
         out.protocolVersion = buf.readByte();
-        out.maxPacketSize = buf.readUint16();
-        out.sessionId = buf.readUint32();
-        out.serverTimestamp = buf.readUint32();
+        out.maxPacketSize = buf.readVarint();
+
+        if (!buf.ok()) return false;
+
+        if (out.isResponse) {
+            out.sessionId = buf.readVarint();
+            out.serverTimestamp = buf.readVarint();
+        } else {
+            out.deviceId = buf.readVarint();
+        }
 
         return buf.ok();
     }
 
     /**
-     * Size of encoded message
+     * Decode without consuming header (header already read)
      */
-    static constexpr size_t encodedSize() {
-        return 1 + 1 + 2 + 4 + 4;  // header + version + maxPacket + sessionId + timestamp
+    static bool decodePayload(ReadBuffer& buf, bool isResponse, Hello& out) {
+        out.isResponse = isResponse;
+        out.protocolVersion = buf.readByte();
+        out.maxPacketSize = buf.readVarint();
+
+        if (!buf.ok()) return false;
+
+        if (isResponse) {
+            out.sessionId = buf.readVarint();
+            out.serverTimestamp = buf.readVarint();
+        } else {
+            out.deviceId = buf.readVarint();
+        }
+
+        return buf.ok();
     }
 };
+
+// Backward compatibility aliases
+using HelloRequest = Hello;
+using HelloResponse = Hello;
 
 } // namespace MicroProto
 

@@ -39,12 +39,12 @@ public:
     void broadcastProperty(const PropertyBase* prop);
     void broadcastAllProperties();
 
-    // MessageHandler interface
-    void onHello(const HelloRequest& hello) override;
-    void onPropertyUpdate(uint8_t propertyId, const void* value, size_t size) override;
+    // MessageHandler interface (MVP)
+    void onHello(const Hello& hello) override;
+    void onPropertyUpdate(uint16_t propertyId, const void* value, size_t size) override;
     void onError(const ErrorMessage& error) override;
-    void onPing(uint32_t payload) override;
-    void onConstraintViolation(uint8_t propertyId, ErrorCode code) override;
+    void onPing(bool isResponse, uint32_t payload) override;
+    void onConstraintViolation(uint16_t propertyId, ErrorCode code) override;
 
 private:
     WebSocketsServer _ws;

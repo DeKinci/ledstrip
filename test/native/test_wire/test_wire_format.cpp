@@ -105,6 +105,59 @@ void test_varint_roundtrip() {
     }
 }
 
+// ==== PropId Tests ====
+
+void test_propid_single_byte() {
+    uint8_t buf[8];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    // 0
+    TEST_ASSERT_TRUE(wb.writePropId(0));
+    TEST_ASSERT_EQUAL(1, wb.position());
+    TEST_ASSERT_EQUAL_HEX8(0x00, buf[0]);
+
+    // 127 (max single byte)
+    wb.reset();
+    TEST_ASSERT_TRUE(wb.writePropId(127));
+    TEST_ASSERT_EQUAL(1, wb.position());
+    TEST_ASSERT_EQUAL_HEX8(0x7F, buf[0]);
+}
+
+void test_propid_two_bytes() {
+    uint8_t buf[8];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    // 128 (first two-byte)
+    TEST_ASSERT_TRUE(wb.writePropId(128));
+    TEST_ASSERT_EQUAL(2, wb.position());
+    TEST_ASSERT_EQUAL_HEX8(0x80, buf[0]);  // Low 7 bits (0) with high bit set
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[1]);  // High 8 bits (128 >> 7 = 1)
+
+    // 32767 (max propid)
+    wb.reset();
+    TEST_ASSERT_TRUE(wb.writePropId(32767));
+    TEST_ASSERT_EQUAL(2, wb.position());
+    TEST_ASSERT_EQUAL_HEX8(0xFF, buf[0]);  // Low 7 bits (127) with high bit
+    TEST_ASSERT_EQUAL_HEX8(0xFF, buf[1]);  // High 8 bits (255)
+}
+
+void test_propid_roundtrip() {
+    uint8_t buf[8];
+
+    uint16_t testValues[] = {0, 1, 127, 128, 255, 256, 1000, 16383, 32767};
+
+    for (uint16_t val : testValues) {
+        WriteBuffer wb(buf, sizeof(buf));
+        TEST_ASSERT_TRUE(wb.writePropId(val));
+
+        ReadBuffer rb(buf, wb.position());
+        uint16_t decoded = rb.readPropId();
+
+        TEST_ASSERT_TRUE(rb.ok());
+        TEST_ASSERT_EQUAL_UINT16(val, decoded);
+    }
+}
+
 // ==== Integer Type Tests ====
 
 void test_uint8_roundtrip() {
@@ -235,34 +288,38 @@ void test_uint32_little_endian() {
 // ==== OpHeader Tests ====
 
 void test_opheader_encode_decode() {
-    OpHeader h1(OpCode::PROPERTY_UPDATE_SHORT, 0, false);
-    uint8_t encoded = h1.encode();
-    TEST_ASSERT_EQUAL_HEX8(0x01, encoded);  // opcode=1, flags=0, batch=0
+    // New API: encodeOpHeader(opcode, flags)
+    uint8_t encoded = encodeOpHeader(OpCode::PROPERTY_UPDATE, 0);
+    TEST_ASSERT_EQUAL_HEX8(0x01, encoded);  // opcode=1 in low 4 bits, flags=0 in high 4 bits
 
-    OpHeader decoded = OpHeader::decode(encoded);
-    TEST_ASSERT_EQUAL(static_cast<uint8_t>(OpCode::PROPERTY_UPDATE_SHORT),
-                      decoded.opcode);
-    TEST_ASSERT_EQUAL(0, decoded.flags);
-    TEST_ASSERT_EQUAL(0, decoded.batch);
+    OpCode opcode;
+    uint8_t flags;
+    decodeOpHeader(encoded, opcode, flags);
+    TEST_ASSERT_EQUAL(static_cast<uint8_t>(OpCode::PROPERTY_UPDATE), static_cast<uint8_t>(opcode));
+    TEST_ASSERT_EQUAL(0, flags);
 }
 
 void test_opheader_with_batch() {
-    OpHeader h(OpCode::PROPERTY_UPDATE_SHORT, 0, true);
-    uint8_t encoded = h.encode();
-    TEST_ASSERT_EQUAL_HEX8(0x81, encoded);  // opcode=1, flags=0, batch=1
+    // PROPERTY_UPDATE with batch flag (bit0 of flags)
+    uint8_t encoded = encodeOpHeader(OpCode::PROPERTY_UPDATE, Flags::BATCH);
+    TEST_ASSERT_EQUAL_HEX8(0x11, encoded);  // opcode=1, flags=1 (batch)
 
-    OpHeader decoded = OpHeader::decode(encoded);
-    TEST_ASSERT_EQUAL(1, decoded.batch);
+    OpCode opcode;
+    uint8_t flags;
+    decodeOpHeader(encoded, opcode, flags);
+    TEST_ASSERT_TRUE(flags & Flags::BATCH);
 }
 
 void test_opheader_with_flags() {
-    OpHeader h(OpCode::HELLO, 5, false);
-    uint8_t encoded = h.encode();
-    TEST_ASSERT_EQUAL_HEX8(0x50, encoded);  // opcode=0, flags=5, batch=0
+    // HELLO with is_response flag
+    uint8_t encoded = encodeOpHeader(OpCode::HELLO, Flags::IS_RESPONSE);
+    TEST_ASSERT_EQUAL_HEX8(0x10, encoded);  // opcode=0, flags=1 (is_response)
 
-    OpHeader decoded = OpHeader::decode(encoded);
-    TEST_ASSERT_EQUAL(0, decoded.opcode);
-    TEST_ASSERT_EQUAL(5, decoded.flags);
+    OpCode opcode;
+    uint8_t flags;
+    decodeOpHeader(encoded, opcode, flags);
+    TEST_ASSERT_EQUAL(0, static_cast<uint8_t>(opcode));
+    TEST_ASSERT_TRUE(flags & Flags::IS_RESPONSE);
 }
 
 // ==== TypeCodec Tests ====
@@ -332,19 +389,18 @@ void test_type_size() {
 
 // ==== PropertyUpdate Encoding Tests (without PropertyBase) ====
 
-void test_property_update_encode_short() {
+void test_property_update_encode_value() {
     uint8_t buf[16];
     WriteBuffer wb(buf, sizeof(buf));
 
     uint8_t val = 128;
-    TEST_ASSERT_TRUE(PropertyUpdate::encodeShortValue(wb, 1, TYPE_UINT8, &val, 1));
+    TEST_ASSERT_TRUE(PropertyUpdate::encodeValue(wb, 1, TYPE_UINT8, &val, 1));
 
-    // Expected: header(0x01) + propId(0x01) + flags(0x00) + value(0x80)
-    TEST_ASSERT_EQUAL(4, wb.position());
-    TEST_ASSERT_EQUAL_HEX8(0x01, buf[0]);  // PROPERTY_UPDATE_SHORT, no batch
-    TEST_ASSERT_EQUAL_HEX8(0x01, buf[1]);  // property_id = 1
-    TEST_ASSERT_EQUAL_HEX8(0x00, buf[2]);  // flags = 0
-    TEST_ASSERT_EQUAL_HEX8(0x80, buf[3]);  // value = 128
+    // Expected: header(0x01) + propId(0x01) + value(0x80)
+    TEST_ASSERT_EQUAL(3, wb.position());
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[0]);  // PROPERTY_UPDATE, no batch
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[1]);  // property_id = 1 (propid encoding)
+    TEST_ASSERT_EQUAL_HEX8(0x80, buf[2]);  // value = 128
 }
 
 void test_property_update_encode_int32() {
@@ -352,38 +408,33 @@ void test_property_update_encode_int32() {
     WriteBuffer wb(buf, sizeof(buf));
 
     int32_t val = 0x12345678;
-    TEST_ASSERT_TRUE(PropertyUpdate::encodeShortValue(wb, 5, TYPE_INT32, &val, 4));
+    TEST_ASSERT_TRUE(PropertyUpdate::encodeValue(wb, 5, TYPE_INT32, &val, 4));
 
-    // header + propId + flags + 4 bytes value
-    TEST_ASSERT_EQUAL(7, wb.position());
+    // header + propId + 4 bytes value
+    TEST_ASSERT_EQUAL(6, wb.position());
     TEST_ASSERT_EQUAL_HEX8(0x05, buf[1]);  // property_id = 5
 
     // Little-endian value
-    TEST_ASSERT_EQUAL_HEX8(0x78, buf[3]);
-    TEST_ASSERT_EQUAL_HEX8(0x56, buf[4]);
-    TEST_ASSERT_EQUAL_HEX8(0x34, buf[5]);
-    TEST_ASSERT_EQUAL_HEX8(0x12, buf[6]);
+    TEST_ASSERT_EQUAL_HEX8(0x78, buf[2]);
+    TEST_ASSERT_EQUAL_HEX8(0x56, buf[3]);
+    TEST_ASSERT_EQUAL_HEX8(0x34, buf[4]);
+    TEST_ASSERT_EQUAL_HEX8(0x12, buf[5]);
 }
 
-void test_property_update_decode_short() {
-    // Manually construct a message
-    uint8_t msg[] = {
-        0x01,  // PROPERTY_UPDATE_SHORT, no batch
-        0x03,  // property_id = 3
-        0x00,  // flags = 0
-        0xAB   // value = 171
-    };
+void test_property_update_large_propid() {
+    uint8_t buf[16];
+    WriteBuffer wb(buf, sizeof(buf));
 
-    ReadBuffer rb(msg, sizeof(msg));
+    uint8_t val = 42;
+    // Property ID 200 requires 2-byte propid encoding
+    TEST_ASSERT_TRUE(PropertyUpdate::encodeValue(wb, 200, TYPE_UINT8, &val, 1));
 
-    uint8_t propId;
-    PropertyUpdateFlags flags;
-    uint8_t value;
-    size_t valueSize;
-
-    TEST_ASSERT_TRUE(PropertyUpdate::decodeShort(rb, propId, flags, &value, valueSize, TYPE_UINT8));
-    TEST_ASSERT_EQUAL_UINT8(3, propId);
-    TEST_ASSERT_EQUAL_UINT8(171, value);
+    // header + 2-byte propId + value
+    TEST_ASSERT_EQUAL(4, wb.position());
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[0]);  // PROPERTY_UPDATE
+    TEST_ASSERT_EQUAL_HEX8(0xC8, buf[1]);  // Low 7 bits of 200 = 72, with high bit set (0x80 | 72 = 0xC8)
+    TEST_ASSERT_EQUAL_HEX8(0x01, buf[2]);  // High 8 bits of 200 = 1 (200 >> 7 = 1)
+    TEST_ASSERT_EQUAL_HEX8(0x2A, buf[3]);  // value = 42
 }
 
 // ==== Setup/Teardown ====
@@ -405,6 +456,11 @@ int main(int argc, char** argv) {
     RUN_TEST(test_varint_single_byte);
     RUN_TEST(test_varint_two_bytes);
     RUN_TEST(test_varint_roundtrip);
+
+    // PropId tests
+    RUN_TEST(test_propid_single_byte);
+    RUN_TEST(test_propid_two_bytes);
+    RUN_TEST(test_propid_roundtrip);
 
     // Integer type tests
     RUN_TEST(test_uint8_roundtrip);
@@ -431,9 +487,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_type_size);
 
     // PropertyUpdate tests
-    RUN_TEST(test_property_update_encode_short);
+    RUN_TEST(test_property_update_encode_value);
     RUN_TEST(test_property_update_encode_int32);
-    RUN_TEST(test_property_update_decode_short);
+    RUN_TEST(test_property_update_large_propid);
 
     return UNITY_END();
 }

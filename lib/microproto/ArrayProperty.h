@@ -3,6 +3,7 @@
 
 #include "PropertyBase.h"
 #include "TypeTraits.h"
+#include "wire/TypeCodec.h"
 #include <array>
 
 namespace MicroProto {
@@ -129,21 +130,36 @@ public:
 
     // =========== Write operations ===========
 
-    // Set entire array
+    // Set entire array (validates element constraints)
     ArrayProperty& operator=(const ArrayType& newValue) {
         if (readonly) return *this;
         if (_value == newValue) return *this;  // No change
+
+        // Validate element constraints
+        if (_elementConstraints.flags.any()) {
+            for (size_t i = 0; i < N; ++i) {
+                if (!_elementConstraints.validate(newValue[i])) {
+                    return *this;  // Reject if any element invalid
+                }
+            }
+        }
+
         _value = newValue;
         notifyChange();
         return *this;
     }
 
-    // Set single element
-    void set(size_t index, const T& value) {
-        if (readonly || index >= N) return;
-        if (_value[index] == value) return;  // No change
+    // Set single element (validates element constraints)
+    bool set(size_t index, const T& value) {
+        if (readonly || index >= N) return false;
+        if (_value[index] == value) return true;  // No change, considered success
+        // Validate element constraints
+        if (_elementConstraints.flags.any() && !_elementConstraints.validate(value)) {
+            return false;
+        }
         _value[index] = value;
         notifyChange();
+        return true;
     }
 
     // Set entire array
@@ -227,6 +243,11 @@ public:
             if (!_elementConstraints.validate(elements[i])) return false;
         }
         return true;
+    }
+
+    // Schema encoding using compile-time type info
+    bool encodeTypeDefinition(WriteBuffer& buf) const override {
+        return SchemaTypeEncoder::encode<T, N>(buf, getElementConstraints());
     }
 
 private:

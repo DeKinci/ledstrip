@@ -4,8 +4,8 @@
 namespace MicroProto {
 
 bool SchemaEncoder::encodeProperty(WriteBuffer& buf, const PropertyBase* prop) {
-    OpHeader header(OpCode::SCHEMA_UPSERT);
-    if (!buf.writeByte(header.encode())) return false;
+    // Single schema upsert (not batched)
+    if (!buf.writeByte(encodeOpHeader(OpCode::SCHEMA_UPSERT, 0))) return false;
 
     return encodePropertyItem(buf, prop);
 }
@@ -15,8 +15,8 @@ size_t SchemaEncoder::encodeAllProperties(WriteBuffer& buf) {
     if (count == 0) return 0;
     if (count > 256) count = 256;
 
-    OpHeader header(OpCode::SCHEMA_UPSERT, 0, true);
-    if (!buf.writeByte(header.encode())) return 0;
+    // Batched schema upsert
+    if (!buf.writeByte(encodeOpHeader(OpCode::SCHEMA_UPSERT, Flags::BATCH))) return false;
 
     if (!buf.writeByte(static_cast<uint8_t>(count - 1))) return 0;
 
@@ -30,101 +30,8 @@ size_t SchemaEncoder::encodeAllProperties(WriteBuffer& buf) {
     return encoded;
 }
 
-// Helper to get the wire size of a basic type (per spec section 3.1)
-static size_t getTypeWireSize(uint8_t typeId) {
-    switch (typeId) {
-        case TYPE_BOOL: return 1;
-        case TYPE_INT8: return 1;
-        case TYPE_UINT8: return 1;
-        case TYPE_INT32: return 4;
-        case TYPE_FLOAT32: return 4;
-        default: return 0;
-    }
-}
-
-// Helper to encode value constraints (validation_flags + optional min/max/step)
-static bool encodeValueConstraints(WriteBuffer& buf, const ValueConstraints* constraints, uint8_t typeId) {
-    if (!constraints || !constraints->flags.any()) {
-        // No constraints
-        if (!buf.writeByte(0)) return false;
-        return true;
-    }
-
-    // Write validation_flags
-    if (!buf.writeByte(constraints->flags.encode())) return false;
-
-    // Get type size for raw value encoding
-    size_t typeSize = getTypeWireSize(typeId);
-    if (typeSize == 0) return true;  // Unknown type, skip values
-
-    // Write min value if present
-    if (constraints->flags.hasMin) {
-        if (!buf.writeBytes(constraints->minValue, typeSize)) return false;
-    }
-
-    // Write max value if present
-    if (constraints->flags.hasMax) {
-        if (!buf.writeBytes(constraints->maxValue, typeSize)) return false;
-    }
-
-    // Write step value if present
-    if (constraints->flags.hasStep) {
-        if (!buf.writeBytes(constraints->stepValue, typeSize)) return false;
-    }
-
-    return true;
-}
-
-// Helper to encode DATA_TYPE_DEFINITION for a property
-static bool encodeTypeDefinition(WriteBuffer& buf, const PropertyBase* prop) {
-    uint8_t typeId = prop->getTypeId();
-
-    if (typeId == TYPE_ARRAY) {
-        // ARRAY: type_id + varint(element_count) + element DATA_TYPE_DEFINITION
-        if (!buf.writeByte(TYPE_ARRAY)) return false;
-        if (!buf.writeVarint(static_cast<uint32_t>(prop->getElementCount()))) return false;
-
-        // Element DATA_TYPE_DEFINITION: element_type_id + element_constraints
-        if (!buf.writeByte(prop->getElementTypeId())) return false;
-        if (!encodeValueConstraints(buf, prop->getElementConstraints(), prop->getElementTypeId())) return false;
-        return true;
-    }
-
-    if (typeId == TYPE_LIST) {
-        // LIST: type_id + length_constraints + element DATA_TYPE_DEFINITION
-        if (!buf.writeByte(TYPE_LIST)) return false;
-
-        // Encode container constraints
-        const ContainerConstraints* cc = prop->getContainerConstraints();
-        if (!cc || !cc->any()) {
-            // No container constraints
-            if (!buf.writeByte(0)) return false;
-        } else {
-            // Write constraint flags
-            if (!buf.writeByte(cc->encode())) return false;
-
-            // Write minLength if present
-            if (cc->hasMinLength) {
-                if (!buf.writeVarint(static_cast<uint32_t>(cc->minLength))) return false;
-            }
-
-            // Write maxLength if present
-            if (cc->hasMaxLength) {
-                if (!buf.writeVarint(static_cast<uint32_t>(cc->maxLength))) return false;
-            }
-        }
-
-        // Element DATA_TYPE_DEFINITION: element_type_id + element_constraints
-        if (!buf.writeByte(prop->getElementTypeId())) return false;
-        if (!encodeValueConstraints(buf, prop->getElementConstraints(), prop->getElementTypeId())) return false;
-        return true;
-    }
-
-    // Basic type: type_id + value_constraints
-    if (!buf.writeByte(typeId)) return false;
-    if (!encodeValueConstraints(buf, prop->getValueConstraints(), typeId)) return false;
-    return true;
-}
+// Note: Type definition encoding is now handled by PropertyBase::encodeTypeDefinition()
+// which uses compile-time type information via SchemaTypeEncoder for full recursive support.
 
 bool SchemaEncoder::encodePropertyItem(WriteBuffer& buf, const PropertyBase* prop) {
     uint8_t itemType = static_cast<uint8_t>(SchemaItemType::PROPERTY);
@@ -141,26 +48,20 @@ bool SchemaEncoder::encodePropertyItem(WriteBuffer& buf, const PropertyBase* pro
         if (!buf.writeByte(prop->group_id)) return false;
     }
 
-    if (!buf.writeByte(prop->id)) return false;
-    if (!buf.writeByte(0)) return false;  // Namespace ID
+    // Property ID using propid encoding
+    if (!buf.writePropId(prop->id)) return false;
 
-    size_t nameLen = strlen(prop->name);
-    if (nameLen > 255) nameLen = 255;
-    if (!buf.writeByte(static_cast<uint8_t>(nameLen))) return false;
-    if (!buf.writeBytes(reinterpret_cast<const uint8_t*>(prop->name), nameLen)) return false;
+    // Namespace ID (propid, 0 = root)
+    if (!buf.writePropId(0)) return false;
 
-    // Description (varint length + bytes, or 0 if no description)
-    if (prop->description) {
-        size_t descLen = strlen(prop->description);
-        if (descLen > 255) descLen = 255;
-        if (!buf.writeVarint(static_cast<uint32_t>(descLen))) return false;
-        if (!buf.writeBytes(reinterpret_cast<const uint8_t*>(prop->description), descLen)) return false;
-    } else {
-        if (!buf.writeVarint(0)) return false;
-    }
+    // Name (ident: u8 length + bytes)
+    if (!buf.writeIdent(prop->name)) return false;
 
-    // Encode DATA_TYPE_DEFINITION (handles basic and container types)
-    if (!encodeTypeDefinition(buf, prop)) return false;
+    // Description (utf8: varint length + bytes)
+    if (!buf.writeUtf8(prop->description)) return false;
+
+    // Encode DATA_TYPE_DEFINITION using compile-time type info
+    if (!prop->encodeTypeDefinition(buf)) return false;
 
     // Encode default value
     if (!TypeCodec::encodeProperty(buf, prop)) return false;
@@ -197,9 +98,11 @@ size_t PropertyEncoder::encodeAllValues(WriteBuffer& buf) {
     if (count == 0) return 0;
     if (count > 256) count = 256;
 
-    OpHeader header(OpCode::PROPERTY_UPDATE_SHORT, 0, true);
-    if (!buf.writeByte(header.encode())) return 0;
+    // Batched property update
+    PropertyUpdateFlags flags;
+    flags.batch = true;
 
+    if (!buf.writeByte(encodeOpHeader(OpCode::PROPERTY_UPDATE, flags.encode()))) return 0;
     if (!buf.writeByte(static_cast<uint8_t>(count - 1))) return 0;
 
     size_t encoded = 0;
@@ -207,17 +110,83 @@ size_t PropertyEncoder::encodeAllValues(WriteBuffer& buf) {
         PropertyBase* prop = PropertyBase::byId[i];
         if (!prop) continue;
 
-        if (!buf.writeByte(prop->id)) return 0;
+        // Property ID using propid encoding
+        if (!buf.writePropId(prop->id)) return 0;
 
-        PropertyUpdateFlags flags;
-        if (!buf.writeByte(flags.encode())) return 0;
-
+        // Value (no flags per property in MVP)
         if (!TypeCodec::encodeProperty(buf, prop)) return 0;
 
         encoded++;
     }
 
     return encoded;
+}
+
+// =========== SCHEMA_DELETE Encoder ===========
+
+bool SchemaDeleteEncoder::encodePropertyDelete(WriteBuffer& buf, uint16_t propertyId) {
+    // Single deletion (not batched)
+    if (!buf.writeByte(encodeOpHeader(OpCode::SCHEMA_DELETE, 0))) return false;
+
+    // Item type: PROPERTY (1) in lower 4 bits
+    if (!buf.writeByte(static_cast<uint8_t>(SchemaItemType::PROPERTY))) return false;
+
+    // Property ID using propid encoding
+    if (!buf.writePropId(propertyId)) return false;
+
+    return true;
+}
+
+bool SchemaDeleteEncoder::encodeBatchedDelete(WriteBuffer& buf, const uint16_t* propertyIds, size_t count) {
+    if (count == 0 || count > 256) return false;
+
+    // Batched deletion
+    if (!buf.writeByte(encodeOpHeader(OpCode::SCHEMA_DELETE, Flags::BATCH))) return false;
+
+    // Batch count (count - 1)
+    if (!buf.writeByte(static_cast<uint8_t>(count - 1))) return false;
+
+    // Each deletion item
+    for (size_t i = 0; i < count; i++) {
+        // Item type: PROPERTY (1)
+        if (!buf.writeByte(static_cast<uint8_t>(SchemaItemType::PROPERTY))) return false;
+
+        // Property ID
+        if (!buf.writePropId(propertyIds[i])) return false;
+    }
+
+    return true;
+}
+
+// =========== SCHEMA_DELETE Decoder ===========
+
+bool SchemaDeleteDecoder::decode(ReadBuffer& buf, uint8_t flags, DeleteItem* items,
+                                  size_t maxItems, size_t& itemCount) {
+    bool batched = flags & Flags::BATCH;
+
+    size_t count = 1;
+    if (batched) {
+        uint8_t batchCount = buf.readByte();
+        if (!buf.ok()) return false;
+        count = static_cast<size_t>(batchCount) + 1;
+    }
+
+    if (count > maxItems) count = maxItems;
+    itemCount = 0;
+
+    for (size_t i = 0; i < count; i++) {
+        uint8_t itemTypeByte = buf.readByte();
+        if (!buf.ok()) return false;
+
+        uint16_t itemId = buf.readPropId();
+        if (!buf.ok()) return false;
+
+        items[itemCount].type = static_cast<SchemaItemType>(itemTypeByte & 0x0F);
+        items[itemCount].itemId = itemId;
+        itemCount++;
+    }
+
+    return true;
 }
 
 } // namespace MicroProto

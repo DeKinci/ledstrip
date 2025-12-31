@@ -3,55 +3,57 @@
 
 #include "../wire/Buffer.h"
 #include "../wire/OpCode.h"
+#include <string.h>
 
 namespace MicroProto {
 
 /**
  * ERROR message - Protocol errors and validation failures
  *
+ * Flags:
+ *   bit0: schema_mismatch  // 1 = state inconsistent, client should resync via HELLO
+ *   bit1-3: reserved
+ *
  * Format:
- *   u8 operation_header (opcode=0x7, flags, batch=0)
+ *   u8 operation_header { opcode: 0x7, flags: see above }
  *   u16 error_code (little-endian)
- *   varint message_length
- *   bytes message (UTF-8)
- *   [u8 related_opcode] (optional, if flags bit 0 set)
+ *   utf8 message (varint length + UTF-8 bytes)
+ *   [u8 related_opcode] (optional, application-level)
+ *
+ * Client behavior:
+ *   When schema_mismatch=1, the client's local schema or state is inconsistent
+ *   with the server. The client should send HELLO to resynchronize.
+ *   When schema_mismatch=0, the error is operational (e.g., validation failed)
+ *   and the client can continue normally.
  */
-
-// Error header flags
-constexpr uint8_t ERROR_FLAG_HAS_RELATED_OPCODE = 0x01;
 
 struct ErrorMessage {
     ErrorCode code = ErrorCode::SUCCESS;
     const char* message = nullptr;
     size_t messageLen = 0;
+    bool schemaMismatch = false;
     bool hasRelatedOpcode = false;
     uint8_t relatedOpcode = 0;
 
     ErrorMessage() = default;
 
-    ErrorMessage(ErrorCode c, const char* msg = nullptr)
-        : code(c), message(msg), messageLen(msg ? strlen(msg) : 0) {}
+    ErrorMessage(ErrorCode c, const char* msg = nullptr, bool mismatch = false)
+        : code(c), message(msg), messageLen(msg ? strlen(msg) : 0), schemaMismatch(mismatch) {}
 
-    ErrorMessage(ErrorCode c, const char* msg, size_t len)
-        : code(c), message(msg), messageLen(len) {}
+    ErrorMessage(ErrorCode c, const char* msg, size_t len, bool mismatch = false)
+        : code(c), message(msg), messageLen(len), schemaMismatch(mismatch) {}
 
     /**
      * Encode ERROR message
      */
     bool encode(WriteBuffer& buf) const {
-        uint8_t flags = hasRelatedOpcode ? ERROR_FLAG_HAS_RELATED_OPCODE : 0;
-        OpHeader header(OpCode::ERROR, flags, false);
-
-        if (!buf.writeByte(header.encode())) return false;
+        uint8_t flags = schemaMismatch ? Flags::SCHEMA_MISMATCH : 0;
+        if (!buf.writeByte(encodeOpHeader(OpCode::ERROR, flags))) return false;
         if (!buf.writeUint16(static_cast<uint16_t>(code))) return false;
-        if (!buf.writeVarint(static_cast<uint32_t>(messageLen))) return false;
+        if (!buf.writeUtf8(message)) return false;
 
-        if (messageLen > 0 && message) {
-            if (!buf.writeBytes(reinterpret_cast<const uint8_t*>(message), messageLen)) {
-                return false;
-            }
-        }
-
+        // Note: related_opcode is application-level, not part of spec
+        // Encode it if present (after message)
         if (hasRelatedOpcode) {
             if (!buf.writeByte(relatedOpcode)) return false;
         }
@@ -66,28 +68,30 @@ struct ErrorMessage {
         uint8_t headerByte = buf.readByte();
         if (!buf.ok()) return false;
 
-        OpHeader header = OpHeader::decode(headerByte);
-        if (header.getOpCode() != OpCode::ERROR) return false;
+        OpCode opcode;
+        uint8_t flags;
+        decodeOpHeader(headerByte, opcode, flags);
 
+        if (opcode != OpCode::ERROR) return false;
+
+        out.schemaMismatch = (flags & Flags::SCHEMA_MISMATCH) != 0;
         out.code = static_cast<ErrorCode>(buf.readUint16());
-        out.messageLen = buf.readVarint();
 
-        if (!buf.ok()) return false;
+        // Read UTF-8 message (zero-copy)
+        out.message = buf.readUtf8(out.messageLen);
 
-        // Zero-copy: point directly into buffer
-        if (out.messageLen > 0) {
-            if (buf.remaining() < out.messageLen) return false;
-            // Get pointer to current position in buffer
-            out.message = reinterpret_cast<const char*>(buf.data() + buf.position());
-            buf.skip(out.messageLen);
-        } else {
-            out.message = nullptr;
-        }
+        return buf.ok();
+    }
 
-        out.hasRelatedOpcode = (header.flags & ERROR_FLAG_HAS_RELATED_OPCODE) != 0;
-        if (out.hasRelatedOpcode) {
-            out.relatedOpcode = buf.readByte();
-        }
+    /**
+     * Decode without consuming header (header already read)
+     */
+    static bool decodePayload(ReadBuffer& buf, uint8_t flags, ErrorMessage& out) {
+        out.schemaMismatch = (flags & Flags::SCHEMA_MISMATCH) != 0;
+        out.code = static_cast<ErrorCode>(buf.readUint16());
+
+        // Read UTF-8 message (zero-copy)
+        out.message = buf.readUtf8(out.messageLen);
 
         return buf.ok();
     }
@@ -102,25 +106,28 @@ struct ErrorMessage {
         return err;
     }
 
-    static ErrorMessage invalidPropertyId(uint8_t propId) {
-        ErrorMessage err(ErrorCode::INVALID_PROPERTY_ID, "Unknown property ID");
-        return err;
+    static ErrorMessage invalidPropertyId(uint16_t propId, bool triggerResync = true) {
+        return ErrorMessage(ErrorCode::INVALID_PROPERTY_ID, "Unknown property ID", triggerResync);
     }
 
-    static ErrorMessage typeMismatch() {
-        return ErrorMessage(ErrorCode::TYPE_MISMATCH, "Type mismatch");
+    static ErrorMessage typeMismatch(bool triggerResync = true) {
+        return ErrorMessage(ErrorCode::TYPE_MISMATCH, "Type mismatch", triggerResync);
     }
 
     static ErrorMessage validationFailed(const char* msg = "Validation failed") {
-        return ErrorMessage(ErrorCode::VALIDATION_FAILED, msg);
+        return ErrorMessage(ErrorCode::VALIDATION_FAILED, msg, false);
     }
 
     static ErrorMessage protocolVersionMismatch() {
-        return ErrorMessage(ErrorCode::PROTOCOL_VERSION_MISMATCH, "Protocol version mismatch");
+        return ErrorMessage(ErrorCode::PROTOCOL_VERSION_MISMATCH, "Protocol version mismatch", true);
     }
 
     static ErrorMessage bufferOverflow() {
-        return ErrorMessage(ErrorCode::BUFFER_OVERFLOW, "Buffer overflow");
+        return ErrorMessage(ErrorCode::BUFFER_OVERFLOW, "Buffer overflow", false);
+    }
+
+    static ErrorMessage notImplemented(const char* msg = "Not implemented") {
+        return ErrorMessage(ErrorCode::NOT_IMPLEMENTED, msg, false);
     }
 };
 

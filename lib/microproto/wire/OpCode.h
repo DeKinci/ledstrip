@@ -6,20 +6,26 @@
 namespace MicroProto {
 
 /**
- * Operation codes from MicroProto protocol spec v1
+ * Operation codes from MicroProto protocol spec v1 (MVP)
+ *
+ * Message header format:
+ *   u8 { opcode: bit4, flags: bit4 }
+ *
+ * Flags are opcode-specific (see below).
  */
 enum class OpCode : uint8_t {
-    HELLO                 = 0x0,
-    PROPERTY_UPDATE_SHORT = 0x1,  // Property update with u8 ID
-    PROPERTY_UPDATE_LONG  = 0x2,  // Property update with u16 ID
-    SCHEMA_UPSERT         = 0x3,  // Create or update schema
-    SCHEMA_DELETE         = 0x4,  // Delete schema definition
-    RPC_CALL              = 0x5,  // Call remote function
-    RPC_RESPONSE          = 0x6,  // Response to RPC call
-    ERROR                 = 0x7,  // Error message
-    PING                  = 0x8,  // Heartbeat request (client -> server)
-    PONG                  = 0x9,  // Heartbeat response (server -> client)
-    // 0xA-0xF reserved
+    HELLO           = 0x0,  // Protocol handshake
+    PROPERTY_UPDATE = 0x1,  // Property value update (propid encoding)
+    // 0x2 reserved for PROPERTY_DELTA (future)
+    SCHEMA_UPSERT   = 0x3,  // Create or update schema
+    SCHEMA_DELETE   = 0x4,  // Delete schema definition
+    RPC             = 0x5,  // Remote procedure call (request + response)
+    PING            = 0x6,  // Heartbeat (request + response)
+    ERROR           = 0x7,  // Error message
+    RESOURCE_GET    = 0x8,  // Get resource body
+    RESOURCE_PUT    = 0x9,  // Create/update resource
+    RESOURCE_DELETE = 0xA,  // Delete resource
+    // 0xB-0xF reserved
 };
 
 /**
@@ -44,64 +50,195 @@ enum class ErrorCode : uint16_t {
  * Protocol constants
  */
 constexpr uint8_t PROTOCOL_VERSION = 1;
+constexpr uint32_t RPC_TIMEOUT_MS = 60000;  // 60 seconds
 
 /**
- * Operation header structure
+ * Encode operation header byte
  *
- * Bit layout:
- *   bits 0-3: opcode (0-15)
- *   bits 4-6: flags (operation-specific)
- *   bit 7: batch_flag (1 if batched)
+ * Format: bits 0-3 = opcode, bits 4-7 = flags
  */
-struct OpHeader {
-    uint8_t opcode   : 4;
-    uint8_t flags    : 3;
-    uint8_t batch    : 1;
+inline uint8_t encodeOpHeader(OpCode opcode, uint8_t flags = 0) {
+    return static_cast<uint8_t>(opcode) | (flags << 4);
+}
 
-    OpHeader() : opcode(0), flags(0), batch(0) {}
+/**
+ * Decode operation header byte
+ */
+inline void decodeOpHeader(uint8_t byte, OpCode& opcode, uint8_t& flags) {
+    opcode = static_cast<OpCode>(byte & 0x0F);
+    flags = (byte >> 4) & 0x0F;
+}
 
-    OpHeader(OpCode op, uint8_t f = 0, bool b = false)
-        : opcode(static_cast<uint8_t>(op)), flags(f), batch(b ? 1 : 0) {}
+/**
+ * Opcode-specific flag definitions
+ *
+ * HELLO (0x0):
+ *   bit0: is_response    // 0=request, 1=response
+ *
+ * PROPERTY_UPDATE (0x1):
+ *   bit0: batch          // 1=batched (batch_count follows)
+ *   bit1: has_timestamp  // 1=timestamp follows (once for entire batch)
+ *
+ * SCHEMA_UPSERT (0x3):
+ *   bit0: batch          // 1=batched
+ *
+ * SCHEMA_DELETE (0x4):
+ *   bit0: batch          // 1=batched
+ *
+ * RPC (0x5):
+ *   Request (bit0=0):
+ *     bit0: is_response     // 0=request
+ *     bit1: needs_response  // 1=wait for response, 0=fire-and-forget
+ *   Response (bit0=1):
+ *     bit0: is_response     // 1=response
+ *     bit1: success         // 1=success, 0=error
+ *     bit2: has_return_value // 1=value present (only if success=1)
+ *
+ * PING (0x6):
+ *   bit0: is_response    // 0=request, 1=response
+ *
+ * ERROR (0x7):
+ *   bit0: schema_mismatch // 1=state inconsistent, client should resync
+ *
+ * RESOURCE_GET (0x8):
+ *   Request (bit0=0):
+ *     bit0: is_response    // 0=request
+ *   Response (bit0=1):
+ *     bit0: is_response    // 1=response
+ *     bit1: status         // 0=ok, 1=error
+ *
+ * RESOURCE_PUT (0x9):
+ *   Request (bit0=0):
+ *     bit0: is_response    // 0=request
+ *     bit1: update_header  // 1=header_value follows
+ *     bit2: update_body    // 1=body_data follows
+ *   Response (bit0=1):
+ *     bit0: is_response    // 1=response
+ *     bit1: status         // 0=ok, 1=error
+ *
+ * RESOURCE_DELETE (0xA):
+ *   bit0: is_response    // 0=request, 1=response
+ *   bit1: status         // Response only: 0=ok, 1=error
+ */
 
-    // Encode to single byte
+// Common flag masks
+namespace Flags {
+    // HELLO, PING, RPC, RESOURCE_*
+    constexpr uint8_t IS_RESPONSE = 0x01;
+
+    // PROPERTY_UPDATE, SCHEMA_UPSERT, SCHEMA_DELETE
+    constexpr uint8_t BATCH = 0x01;
+
+    // PROPERTY_UPDATE
+    constexpr uint8_t HAS_TIMESTAMP = 0x02;
+
+    // RPC request
+    constexpr uint8_t NEEDS_RESPONSE = 0x02;
+
+    // RPC response
+    constexpr uint8_t SUCCESS = 0x02;
+    constexpr uint8_t HAS_RETURN_VALUE = 0x04;
+
+    // ERROR
+    constexpr uint8_t SCHEMA_MISMATCH = 0x01;
+
+    // RESOURCE_GET/PUT/DELETE response
+    constexpr uint8_t STATUS_ERROR = 0x02;
+
+    // RESOURCE_PUT request
+    constexpr uint8_t UPDATE_HEADER = 0x02;
+    constexpr uint8_t UPDATE_BODY = 0x04;
+}
+
+/**
+ * PROPERTY_UPDATE flags helper
+ */
+struct PropertyUpdateFlags {
+    bool batch;
+    bool hasTimestamp;
+
+    PropertyUpdateFlags() : batch(false), hasTimestamp(false) {}
+
     uint8_t encode() const {
-        return (batch << 7) | (flags << 4) | opcode;
+        return (batch ? Flags::BATCH : 0) |
+               (hasTimestamp ? Flags::HAS_TIMESTAMP : 0);
     }
 
-    // Decode from single byte
-    static OpHeader decode(uint8_t byte) {
-        OpHeader h;
-        h.opcode = byte & 0x0F;
-        h.flags = (byte >> 4) & 0x07;
-        h.batch = (byte >> 7) & 0x01;
-        return h;
-    }
-
-    OpCode getOpCode() const {
-        return static_cast<OpCode>(opcode);
+    static PropertyUpdateFlags decode(uint8_t flags) {
+        PropertyUpdateFlags f;
+        f.batch = flags & Flags::BATCH;
+        f.hasTimestamp = flags & Flags::HAS_TIMESTAMP;
+        return f;
     }
 };
 
 /**
- * Property update flags
+ * RPC flags helper
  */
-struct PropertyUpdateFlags {
-    uint8_t has_timestamp : 1;
-    uint8_t force_notify  : 1;
-    uint8_t has_version   : 1;
-    uint8_t reserved      : 5;
+struct RpcFlags {
+    bool isResponse;
+    // Request fields
+    bool needsResponse;
+    // Response fields
+    bool success;
+    bool hasReturnValue;
 
-    PropertyUpdateFlags() : has_timestamp(0), force_notify(0), has_version(0), reserved(0) {}
+    RpcFlags() : isResponse(false), needsResponse(false), success(false), hasReturnValue(false) {}
 
     uint8_t encode() const {
-        return (has_version << 2) | (force_notify << 1) | has_timestamp;
+        if (isResponse) {
+            return Flags::IS_RESPONSE |
+                   (success ? Flags::SUCCESS : 0) |
+                   (hasReturnValue ? Flags::HAS_RETURN_VALUE : 0);
+        } else {
+            return (needsResponse ? Flags::NEEDS_RESPONSE : 0);
+        }
     }
 
-    static PropertyUpdateFlags decode(uint8_t byte) {
-        PropertyUpdateFlags f;
-        f.has_timestamp = byte & 0x01;
-        f.force_notify = (byte >> 1) & 0x01;
-        f.has_version = (byte >> 2) & 0x01;
+    static RpcFlags decode(uint8_t flags) {
+        RpcFlags f;
+        f.isResponse = flags & Flags::IS_RESPONSE;
+        if (f.isResponse) {
+            f.success = flags & Flags::SUCCESS;
+            f.hasReturnValue = flags & Flags::HAS_RETURN_VALUE;
+        } else {
+            f.needsResponse = flags & Flags::NEEDS_RESPONSE;
+        }
+        return f;
+    }
+};
+
+/**
+ * RESOURCE_PUT flags helper
+ */
+struct ResourcePutFlags {
+    bool isResponse;
+    // Request fields
+    bool updateHeader;
+    bool updateBody;
+    // Response fields
+    bool statusError;
+
+    ResourcePutFlags() : isResponse(false), updateHeader(false), updateBody(false), statusError(false) {}
+
+    uint8_t encode() const {
+        if (isResponse) {
+            return Flags::IS_RESPONSE | (statusError ? Flags::STATUS_ERROR : 0);
+        } else {
+            return (updateHeader ? Flags::UPDATE_HEADER : 0) |
+                   (updateBody ? Flags::UPDATE_BODY : 0);
+        }
+    }
+
+    static ResourcePutFlags decode(uint8_t flags) {
+        ResourcePutFlags f;
+        f.isResponse = flags & Flags::IS_RESPONSE;
+        if (f.isResponse) {
+            f.statusError = flags & Flags::STATUS_ERROR;
+        } else {
+            f.updateHeader = flags & Flags::UPDATE_HEADER;
+            f.updateBody = flags & Flags::UPDATE_BODY;
+        }
         return f;
     }
 };

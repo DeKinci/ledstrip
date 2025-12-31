@@ -135,6 +135,70 @@ public:
         return writeByte(value ? 1 : 0);
     }
 
+    /**
+     * Write propid (1-2 byte property/function ID)
+     *
+     * Format:
+     *   0-127:     1 byte  [0xxxxxxx]
+     *   128-32767: 2 bytes [1xxxxxxx] [xxxxxxxx]
+     *
+     * Returns true on success, false on overflow or invalid ID
+     */
+    bool writePropId(uint16_t id) {
+        if (id <= 127) {
+            return writeByte(static_cast<uint8_t>(id));
+        } else if (id <= 32767) {
+            // Low 7 bits with high bit set, then high 8 bits
+            return writeByte(0x80 | (id & 0x7F)) &&
+                   writeByte(static_cast<uint8_t>(id >> 7));
+        }
+        // ID out of range (> 32767)
+        _overflow = true;
+        return false;
+    }
+
+    /**
+     * Write ident (length-prefixed ASCII identifier)
+     *
+     * Format: u8 length + ASCII bytes
+     * Valid chars: a-z, A-Z, 0-9, _
+     * Max length: 255 bytes
+     */
+    bool writeIdent(const char* str) {
+        if (!str) {
+            return writeByte(0);
+        }
+        size_t len = 0;
+        while (str[len] != '\0' && len < 256) len++;
+        if (len > 255) {
+            _overflow = true;
+            return false;
+        }
+        return writeByte(static_cast<uint8_t>(len)) &&
+               writeBytes(reinterpret_cast<const uint8_t*>(str), len);
+    }
+
+    /**
+     * Write utf8 string (varint length + UTF-8 bytes)
+     */
+    bool writeUtf8(const char* str) {
+        if (!str) {
+            return writeVarint(0) > 0;
+        }
+        size_t len = 0;
+        while (str[len] != '\0') len++;
+        return writeVarint(static_cast<uint32_t>(len)) > 0 &&
+               writeBytes(reinterpret_cast<const uint8_t*>(str), len);
+    }
+
+    /**
+     * Write blob (varint length + raw bytes)
+     */
+    bool writeBlob(const uint8_t* data, size_t len) {
+        return writeVarint(static_cast<uint32_t>(len)) > 0 &&
+               writeBytes(data, len);
+    }
+
 private:
     uint8_t* _buffer;
     size_t _capacity;
@@ -287,6 +351,99 @@ public:
     // Read bool (single byte)
     bool readBool() {
         return readByte() != 0;
+    }
+
+    /**
+     * Read propid (1-2 byte property/function ID)
+     *
+     * Format:
+     *   0-127:     1 byte  [0xxxxxxx]
+     *   128-32767: 2 bytes [1xxxxxxx] [xxxxxxxx]
+     *
+     * Returns ID, sets error flag on failure
+     */
+    uint16_t readPropId() {
+        if (_pos >= _length) {
+            _error = true;
+            return 0;
+        }
+        uint8_t b0 = _buffer[_pos++];
+        if ((b0 & 0x80) == 0) {
+            // Single byte: 0-127
+            return b0;
+        }
+        // Two bytes: 128-32767
+        if (_pos >= _length) {
+            _error = true;
+            return 0;
+        }
+        uint8_t b1 = _buffer[_pos++];
+        return (b0 & 0x7F) | (static_cast<uint16_t>(b1) << 7);
+    }
+
+    /**
+     * Read ident (length-prefixed ASCII identifier)
+     *
+     * Returns pointer to string in buffer (NOT null-terminated!)
+     * Sets outLen to string length
+     * Returns nullptr on error
+     */
+    const char* readIdent(size_t& outLen) {
+        if (_pos >= _length) {
+            _error = true;
+            outLen = 0;
+            return nullptr;
+        }
+        uint8_t len = _buffer[_pos++];
+        if (_pos + len > _length) {
+            _error = true;
+            outLen = 0;
+            return nullptr;
+        }
+        const char* str = reinterpret_cast<const char*>(_buffer + _pos);
+        _pos += len;
+        outLen = len;
+        return str;
+    }
+
+    /**
+     * Read utf8 string (varint length + UTF-8 bytes)
+     *
+     * Returns pointer to string in buffer (NOT null-terminated!)
+     * Sets outLen to string length
+     * Returns nullptr on error
+     */
+    const char* readUtf8(size_t& outLen) {
+        uint32_t len = readVarint();
+        if (_error || _pos + len > _length) {
+            _error = true;
+            outLen = 0;
+            return nullptr;
+        }
+        const char* str = reinterpret_cast<const char*>(_buffer + _pos);
+        _pos += len;
+        outLen = len;
+        return str;
+    }
+
+    /**
+     * Read blob (varint length + raw bytes)
+     *
+     * Returns pointer to data in buffer
+     * Sets outLen to blob length
+     * Returns nullptr on error
+     */
+    const uint8_t* readBlob(size_t& outLen) {
+        uint32_t len = readVarint();
+        if (_error || _pos + len > _length) {
+            _error = true;
+            outLen = 0;
+            return nullptr;
+        }
+        const uint8_t* data = _buffer + _pos;
+        _pos += len;
+        outLen = len;
+        return data;
     }
 
 private:

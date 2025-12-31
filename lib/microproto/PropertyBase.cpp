@@ -1,5 +1,8 @@
 #include "PropertyBase.h"
 #include "PropertySystem.h"
+#ifdef ARDUINO
+#include "PropertyStorage.h"
+#endif
 
 namespace MicroProto {
 
@@ -42,6 +45,22 @@ void PropertyBase::notifyChange() {
 
     // Mark dirty for system-level processing (broadcast, persist, etc.)
     PropertySystem::markDirty(id, persistent);
+}
+
+bool PropertyBase::saveToNVS() {
+#ifdef ARDUINO
+    return PropertyStorage::save(this);
+#else
+    return true;  // Stub for native tests
+#endif
+}
+
+bool PropertyBase::loadFromNVS() {
+#ifdef ARDUINO
+    return PropertyStorage::load(this);
+#else
+    return false;  // Stub for native tests (no stored data)
+#endif
 }
 
 } // namespace MicroProto

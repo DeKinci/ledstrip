@@ -55,7 +55,7 @@ void PropertySystem::loop() {
             // Direct O(1) lookup
             PropertyBase* p = PropertyBase::byId[i];
             if (p && p->persistent) {
-                PropertyStorage::save(p);
+                p->saveToNVS();  // Use virtual method for proper serialization
                 LOG_DEBUG(TAG, "Persisted property %d (%s)", p->id, p->name);
             }
             _persistDirty.clear(i);
@@ -81,7 +81,7 @@ void PropertySystem::loadFromStorage() {
         PropertyBase* prop = PropertyBase::byId[i];
         if (prop && prop->persistent) {
             LOG_DEBUG(TAG, "  Loading property: %s (id=%d)", prop->name, prop->id);
-            bool success = PropertyStorage::load(prop);
+            bool success = prop->loadFromNVS();  // Use virtual method for proper deserialization
             if (success) loaded++;
         }
     }
@@ -92,7 +92,7 @@ void PropertySystem::saveToStorage() {
     for (uint8_t i = 0; i < PropertyBase::count; i++) {
         PropertyBase* prop = PropertyBase::byId[i];
         if (prop && prop->persistent) {
-            PropertyStorage::save(prop);
+            prop->saveToNVS();  // Use virtual method for proper serialization
         }
     }
 }

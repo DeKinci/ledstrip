@@ -9,6 +9,9 @@
 
 namespace MicroProto {
 
+// Forward declaration for schema encoding
+class WriteBuffer;
+
 using microcore::MicroFunction;
 
 enum class PropertyLevel : uint8_t {
@@ -195,14 +198,21 @@ struct ContainerConstraints {
 /**
  * Type-erased value constraints for basic types
  * Stores min/max/step as raw bytes (max 4 bytes for int32/float)
+ * Supports oneof/enum validation with up to MAX_ONEOF_COUNT allowed values
  */
 struct ValueConstraints {
     static constexpr size_t MAX_SIZE = 4;
+    static constexpr size_t MAX_ONEOF_COUNT = 16;  // Max enum values
 
     ValidationFlags flags;
     uint8_t minValue[MAX_SIZE] = {};
     uint8_t maxValue[MAX_SIZE] = {};
     uint8_t stepValue[MAX_SIZE] = {};
+
+    // Oneof (enum) values - stored as raw bytes, MAX_SIZE bytes per value
+    uint8_t oneofValues[MAX_ONEOF_COUNT * MAX_SIZE] = {};
+    uint8_t oneofCount = 0;
+    uint8_t oneofValueSize = 0;  // Size of each value in bytes
 
     template<typename T>
     void setMin(T value) {
@@ -225,6 +235,39 @@ struct ValueConstraints {
         flags.hasStep = true;
     }
 
+    /**
+     * Set allowed enum values (oneof constraint)
+     * Usage: constraints.setOneOf<uint8_t>({1, 2, 4, 8});
+     */
+    template<typename T>
+    void setOneOf(std::initializer_list<T> values) {
+        static_assert(sizeof(T) <= MAX_SIZE, "Type too large");
+        oneofCount = 0;
+        oneofValueSize = sizeof(T);
+        for (auto v : values) {
+            if (oneofCount >= MAX_ONEOF_COUNT) break;
+            memcpy(&oneofValues[oneofCount * MAX_SIZE], &v, sizeof(T));
+            oneofCount++;
+        }
+        flags.hasOneOf = true;
+    }
+
+    /**
+     * Add a single enum value
+     */
+    template<typename T>
+    bool addOneOf(T value) {
+        static_assert(sizeof(T) <= MAX_SIZE, "Type too large");
+        if (oneofCount >= MAX_ONEOF_COUNT) return false;
+        if (oneofCount == 0) {
+            oneofValueSize = sizeof(T);
+        }
+        memcpy(&oneofValues[oneofCount * MAX_SIZE], &value, sizeof(T));
+        oneofCount++;
+        flags.hasOneOf = true;
+        return true;
+    }
+
     template<typename T>
     T getMin() const { T v; memcpy(&v, minValue, sizeof(T)); return v; }
 
@@ -234,10 +277,37 @@ struct ValueConstraints {
     template<typename T>
     T getStep() const { T v; memcpy(&v, stepValue, sizeof(T)); return v; }
 
+    /**
+     * Get oneof value by index
+     */
+    template<typename T>
+    T getOneOf(size_t index) const {
+        T v{};
+        if (index < oneofCount) {
+            memcpy(&v, &oneofValues[index * MAX_SIZE], sizeof(T));
+        }
+        return v;
+    }
+
+    /**
+     * Check if value is in the oneof set
+     */
+    template<typename T>
+    bool isInOneOf(T value) const {
+        if (!flags.hasOneOf || oneofCount == 0) return true;
+        for (size_t i = 0; i < oneofCount; i++) {
+            T allowed;
+            memcpy(&allowed, &oneofValues[i * MAX_SIZE], sizeof(T));
+            if (value == allowed) return true;
+        }
+        return false;
+    }
+
     template<typename T>
     bool validate(T value) const {
         if (flags.hasMin && value < getMin<T>()) return false;
         if (flags.hasMax && value > getMax<T>()) return false;
+        if (flags.hasOneOf && !isInOneOf(value)) return false;
         return true;
     }
 };
@@ -248,6 +318,9 @@ struct ValueConstraints {
  * Usage:
  *   Property<uint8_t> brightness("brightness", 128, PropertyLevel::LOCAL,
  *       Constraints<uint8_t>().min(0).max(255).step(1));
+ *
+ *   Property<uint8_t> mode("mode", 0, PropertyLevel::LOCAL,
+ *       Constraints<uint8_t>().oneof({0, 1, 2, 4}));  // Enum values
  */
 template<typename T>
 struct Constraints {
@@ -267,6 +340,15 @@ struct Constraints {
 
     constexpr Constraints& step(T v) {
         value.setStep(v);
+        return *this;
+    }
+
+    /**
+     * Set allowed enum values (oneof constraint)
+     * Value must be one of the specified values to be valid
+     */
+    Constraints& oneof(std::initializer_list<T> values) {
+        value.setOneOf<T>(values);
         return *this;
     }
 };
@@ -419,6 +501,16 @@ public:
     // Validation - returns true if value passes all constraints
     // Default implementation returns true; derived classes override
     virtual bool validateValue(const void* data, size_t size) const { return true; }
+
+    // Schema encoding - encode DATA_TYPE_DEFINITION for this property's type
+    // Uses compile-time type info via template visitor pattern
+    virtual bool encodeTypeDefinition(WriteBuffer& buf) const = 0;
+
+    // Persistence - virtual methods for NVS storage
+    // Default implementation uses PropertyStorage::save/load with getData()/setData()
+    // ResourceProperty overrides these to serialize headers properly
+    virtual bool saveToNVS();
+    virtual bool loadFromNVS();
 
     // Per-property change callback - called immediately on value change
     // Simple function pointer (no captures needed for app-level reactions)
