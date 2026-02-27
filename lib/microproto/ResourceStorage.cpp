@@ -30,7 +30,8 @@ bool ResourceStorage::init() {
 
 void ResourceStorage::getBodyPath(const char* propName, uint32_t resourceId,
                                    char* buffer, size_t bufferSize) {
-    snprintf(buffer, bufferSize, "/res/%s/%lu.bin",
+    // Use flat naming (no subdirectories) - SPIFFS on ESP32 has folder issues
+    snprintf(buffer, bufferSize, "/r_%s_%lu.bin",
              propName, static_cast<unsigned long>(resourceId));
 }
 
@@ -42,12 +43,7 @@ bool ResourceStorage::writeBody(const char* propName, uint32_t resourceId,
     char path[64];
     getBodyPath(propName, resourceId, path, sizeof(path));
 
-    // Ensure parent directory exists (create property dir)
-    char dir[48];
-    snprintf(dir, sizeof(dir), "/res/%s", propName);
-    if (!SPIFFS.exists(dir)) {
-        // SPIFFS creates directories implicitly when writing files
-    }
+    // No directory creation needed - using flat file naming
 
     File file = SPIFFS.open(path, FILE_WRITE);
     if (!file) {
@@ -162,20 +158,24 @@ bool ResourceStorage::deleteAllBodies(const char* propName) {
 #ifdef ARDUINO
     if (!_initialized && !init()) return false;
 
-    char dir[48];
-    snprintf(dir, sizeof(dir), "/res/%s", propName);
+    // Build prefix to match: "/r_propName_"
+    char prefix[48];
+    snprintf(prefix, sizeof(prefix), "/r_%s_", propName);
+    size_t prefixLen = strlen(prefix);
 
-    File root = SPIFFS.open(dir);
-    if (!root || !root.isDirectory()) {
-        return true;  // Directory doesn't exist
-    }
+    // Iterate through all files and delete those matching prefix
+    File root = SPIFFS.open("/");
+    if (!root) return true;
 
     File file = root.openNextFile();
     while (file) {
-        char path[64];
-        snprintf(path, sizeof(path), "%s/%s", dir, file.name());
+        const char* name = file.name();
         file.close();
-        SPIFFS.remove(path);
+
+        // Check if filename starts with our prefix
+        if (strncmp(name, prefix, prefixLen) == 0) {
+            SPIFFS.remove(name);
+        }
         file = root.openNextFile();
     }
 

@@ -9,9 +9,7 @@ void MicroProtoServer::begin() {
         handleEvent(num, type, payload, length);
     });
 
-    PropertySystem::onFlush([this](const DirtySet& dirty) {
-        this->onPropertiesChanged(dirty);
-    });
+    PropertySystem::addFlushListener(this);
 
     Serial.println("[MicroProto] Server started");
 }
@@ -28,14 +26,13 @@ uint8_t MicroProtoServer::connectedClients() {
 void MicroProtoServer::broadcastProperty(const PropertyBase* prop) {
     if (_ws.connectedClients() == 0) return;
 
-    uint8_t buf[TX_BUFFER_SIZE];
-    WriteBuffer wb(buf, sizeof(buf));
+    WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
 
     if (PropertyUpdate::encode(wb, prop)) {
         // Only send to clients that have completed handshake
         for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
             if (_clientReady[i]) {
-                _ws.sendBIN(i, buf, wb.position());
+                _ws.sendBIN(i, _txBuf, wb.position());
             }
         }
     }
@@ -44,23 +41,22 @@ void MicroProtoServer::broadcastProperty(const PropertyBase* prop) {
 void MicroProtoServer::broadcastAllProperties() {
     if (_ws.connectedClients() == 0) return;
 
-    uint8_t buf[TX_BUFFER_SIZE];
-    WriteBuffer wb(buf, sizeof(buf));
+    WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
 
     if (PropertyEncoder::encodeAllValues(wb) > 0) {
         // Only send to clients that have completed handshake
         for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
             if (_clientReady[i]) {
-                _ws.sendBIN(i, buf, wb.position());
+                _ws.sendBIN(i, _txBuf, wb.position());
             }
         }
     }
 }
 
-void MicroProtoServer::onHello(const Hello& hello) {
+void MicroProtoServer::onHello(uint8_t clientId, const Hello& hello) {
     // We only handle requests (is_response=false) on server side
     if (hello.isResponse) {
-        Serial.printf("[MicroProto] Unexpected HELLO response from client %u\n", _currentClient);
+        Serial.printf("[MicroProto] Unexpected HELLO response from client %u\n", clientId);
         return;
     }
 
@@ -68,19 +64,26 @@ void MicroProtoServer::onHello(const Hello& hello) {
                   static_cast<unsigned long>(hello.deviceId), hello.protocolVersion);
 
     if (hello.protocolVersion != PROTOCOL_VERSION) {
-        sendError(_currentClient, ErrorMessage::protocolVersionMismatch());
+        sendError(clientId, ErrorMessage::protocolVersionMismatch());
         return;
     }
 
-    sendHelloResponse(_currentClient);
-    sendSchema(_currentClient);
-    sendAllPropertyValues(_currentClient);
+    // Clear ready state before resync — prevents stale broadcasts during handshake
+    if (clientId < MAX_CLIENTS) {
+        _clientReady[clientId] = false;
+    }
 
-    _clientReady[_currentClient] = true;
-    Serial.printf("[MicroProto] Client %u sync complete\n", _currentClient);
+    sendHelloResponse(clientId);
+    sendSchema(clientId);
+    sendAllPropertyValues(clientId);
+
+    if (clientId < MAX_CLIENTS) {
+        _clientReady[clientId] = true;
+    }
+    Serial.printf("[MicroProto] Client %u sync complete\n", clientId);
 }
 
-void MicroProtoServer::onPropertyUpdate(uint16_t propertyId, const void* value, size_t size) {
+void MicroProtoServer::onPropertyUpdate(uint8_t clientId, uint16_t propertyId, const void* value, size_t size) {
     if (propertyId > 255) {
         Serial.printf("[MicroProto] Property ID %d exceeds MVP limit\n", propertyId);
         return;
@@ -100,30 +103,30 @@ void MicroProtoServer::onPropertyUpdate(uint16_t propertyId, const void* value, 
     p->setData(value, size);
 
     Serial.printf("[MicroProto] Property %d updated by client %u\n",
-                  propertyId, _currentClient);
+                  propertyId, clientId);
 
-    broadcastPropertyExcept(p, _currentClient);
+    broadcastPropertyExcept(p, clientId);
 }
 
-void MicroProtoServer::onError(const ErrorMessage& error) {
-    Serial.printf("[MicroProto] Error from client: code=%d, schemaMismatch=%d\n",
-                  static_cast<uint16_t>(error.code), error.schemaMismatch);
+void MicroProtoServer::onError(uint8_t clientId, const ErrorMessage& error) {
+    Serial.printf("[MicroProto] Error from client %u: code=%d, schemaMismatch=%d\n",
+                  clientId, static_cast<uint16_t>(error.code), error.schemaMismatch);
 }
 
-void MicroProtoServer::onPing(bool isResponse, uint32_t payload) {
+void MicroProtoServer::onPing(uint8_t clientId, bool isResponse, uint32_t payload) {
     if (isResponse) {
         // Unexpected pong from client (we didn't send a ping)
-        Serial.printf("[MicroProto] Unexpected PONG from client %u\n", _currentClient);
+        Serial.printf("[MicroProto] Unexpected PONG from client %u\n", clientId);
         return;
     }
     // Client sent ping, respond with pong
-    sendPong(_currentClient, payload);
+    sendPong(clientId, payload);
 }
 
-void MicroProtoServer::onConstraintViolation(uint16_t propertyId, ErrorCode code) {
+void MicroProtoServer::onConstraintViolation(uint8_t clientId, uint16_t propertyId, ErrorCode code) {
     Serial.printf("[MicroProto] Constraint violation on property %d, sending error to client %u\n",
-                  propertyId, _currentClient);
-    sendError(_currentClient, ErrorMessage::validationFailed("Constraint violation"));
+                  propertyId, clientId);
+    sendError(clientId, ErrorMessage::validationFailed("Constraint violation"));
 }
 
 void MicroProtoServer::handleEvent(uint8_t num, WStype_t type, uint8_t* payload, size_t length) {
@@ -145,8 +148,7 @@ void MicroProtoServer::handleEvent(uint8_t num, WStype_t type, uint8_t* payload,
         } break;
 
         case WStype_BIN:
-            _currentClient = num;
-            if (!_router.process(payload, length)) {
+            if (!_router.process(num, payload, length)) {
                 Serial.printf("[MicroProto] Parse error from client %u\n", num);
                 sendError(num, ErrorMessage(ErrorCode::INVALID_OPCODE, "Parse error"));
             }
@@ -173,24 +175,22 @@ void MicroProtoServer::sendHelloResponse(uint8_t clientNum) {
 }
 
 void MicroProtoServer::sendSchema(uint8_t clientNum) {
-    uint8_t buf[TX_BUFFER_SIZE];
-    WriteBuffer wb(buf, sizeof(buf));
+    WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
 
     size_t count = SchemaEncoder::encodeAllProperties(wb);
     if (count > 0) {
-        _ws.sendBIN(clientNum, buf, wb.position());
+        _ws.sendBIN(clientNum, _txBuf, wb.position());
         Serial.printf("[MicroProto] Sent schema (%d properties) to client %u\n",
                       count, clientNum);
     }
 }
 
 void MicroProtoServer::sendAllPropertyValues(uint8_t clientNum) {
-    uint8_t buf[TX_BUFFER_SIZE];
-    WriteBuffer wb(buf, sizeof(buf));
+    WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
 
     size_t count = PropertyEncoder::encodeAllValues(wb);
     if (count > 0) {
-        _ws.sendBIN(clientNum, buf, wb.position());
+        _ws.sendBIN(clientNum, _txBuf, wb.position());
         Serial.printf("[MicroProto] Sent %d property values to client %u\n",
                       count, clientNum);
     }
@@ -217,14 +217,13 @@ void MicroProtoServer::sendPong(uint8_t clientNum, uint32_t payload) {
 }
 
 void MicroProtoServer::broadcastPropertyExcept(const PropertyBase* prop, uint8_t excludeClient) {
-    uint8_t buf[TX_BUFFER_SIZE];
-    WriteBuffer wb(buf, sizeof(buf));
+    WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
 
     if (!PropertyUpdate::encode(wb, prop)) return;
 
     for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
         if (i != excludeClient && _clientReady[i]) {
-            _ws.sendBIN(i, buf, wb.position());
+            _ws.sendBIN(i, _txBuf, wb.position());
         }
     }
 }
@@ -268,11 +267,10 @@ void MicroProtoServer::flushBroadcasts() {
     }
 
     // Encode in batches, flushing when buffer gets full
-    uint8_t buf[TX_BUFFER_SIZE];
     size_t batchStart = 0;
 
     while (batchStart < dirtyCount) {
-        WriteBuffer wb(buf, sizeof(buf));
+        WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
 
         // Try to fit as many properties as possible
         size_t batchEnd = batchStart;
@@ -305,12 +303,12 @@ void MicroProtoServer::flushBroadcasts() {
         if (batchCount == 0) break;  // Can't fit even one property
 
         // Update count byte (count - 1)
-        buf[countPos] = static_cast<uint8_t>(batchCount - 1);
+        _txBuf[countPos] = static_cast<uint8_t>(batchCount - 1);
 
         // Send to all ready clients
         for (uint8_t i = 0; i < MAX_CLIENTS; i++) {
             if (_clientReady[i]) {
-                _ws.sendBIN(i, buf, lastGoodPos);
+                _ws.sendBIN(i, _txBuf, lastGoodPos);
             }
         }
 
@@ -318,6 +316,169 @@ void MicroProtoServer::flushBroadcasts() {
     }
 
     _pendingBroadcast.clearAll();
+}
+
+// =========== Resource Handlers ===========
+
+void MicroProtoServer::onResourceGetRequest(uint8_t clientId, uint8_t requestId, uint16_t propertyId, uint32_t resourceId) {
+    PropertyBase* prop = PropertyBase::find(static_cast<uint8_t>(propertyId));
+    if (!prop || prop->getTypeId() != TYPE_RESOURCE) {
+        Serial.printf("[MicroProto] RESOURCE_GET: property %d not found or not RESOURCE type\n", propertyId);
+        sendResourceGetError(clientId, requestId, ResourceError::NOT_FOUND);
+        return;
+    }
+
+    // Get body size first
+    size_t bodySize = prop->getResourceBodySize(resourceId);
+    if (bodySize == 0) {
+        Serial.printf("[MicroProto] RESOURCE_GET: resource %lu not found in property %d\n", resourceId, propertyId);
+        sendResourceGetError(clientId, requestId, ResourceError::NOT_FOUND);
+        return;
+    }
+
+    // Cap body size to prevent unbounded allocation
+    if (bodySize > TX_BUFFER_SIZE) {
+        Serial.printf("[MicroProto] RESOURCE_GET: body %lu bytes exceeds TX buffer\n", bodySize);
+        sendResourceGetError(clientId, requestId, ResourceError::ERROR);
+        return;
+    }
+
+    // Read body into _auxBuf (sendResourceGetOk uses _txBuf for encoding)
+    size_t bytesRead = prop->readResourceBody(resourceId, _auxBuf, bodySize);
+
+    if (bytesRead == 0) {
+        Serial.printf("[MicroProto] RESOURCE_GET: failed to read body for resource %lu\n", resourceId);
+        sendResourceGetError(clientId, requestId, ResourceError::ERROR);
+        return;
+    }
+
+    Serial.printf("[MicroProto] RESOURCE_GET: sending %d bytes for resource %lu\n", bytesRead, resourceId);
+    sendResourceGetOk(clientId, requestId, _auxBuf, bytesRead);
+}
+
+void MicroProtoServer::onResourcePutRequest(uint8_t clientId, uint8_t requestId, uint16_t propertyId,
+                                             uint32_t resourceId,
+                                             const uint8_t* headerData, size_t headerLen,
+                                             const uint8_t* bodyData, size_t bodyLen) {
+    PropertyBase* prop = PropertyBase::find(static_cast<uint8_t>(propertyId));
+    if (!prop || prop->getTypeId() != TYPE_RESOURCE) {
+        Serial.printf("[MicroProto] RESOURCE_PUT: property %d not found or not RESOURCE type\n", propertyId);
+        sendResourcePutError(clientId, requestId, ResourceError::NOT_FOUND);
+        return;
+    }
+
+    if (resourceId == 0) {
+        // Create new resource
+        uint32_t newId = prop->createResource(headerData, headerLen, bodyData, bodyLen);
+        if (newId == 0) {
+            Serial.printf("[MicroProto] RESOURCE_PUT: failed to create resource\n");
+            sendResourcePutError(clientId, requestId, ResourceError::OUT_OF_SPACE);
+            return;
+        }
+        Serial.printf("[MicroProto] RESOURCE_PUT: created resource %lu\n", newId);
+        sendResourcePutOk(clientId, requestId, newId);
+
+        // Broadcast updated property to ALL clients (including requester - they need updated header list)
+        broadcastPropertyExcept(prop, NO_EXCLUDE);
+    } else {
+        // Update existing resource
+        bool success = true;
+        if (headerData && headerLen > 0) {
+            success = prop->updateResourceHeader(resourceId, headerData, headerLen);
+        }
+        if (success && bodyData && bodyLen > 0) {
+            success = prop->updateResourceBody(resourceId, bodyData, bodyLen);
+        }
+
+        if (!success) {
+            Serial.printf("[MicroProto] RESOURCE_PUT: failed to update resource %lu\n", resourceId);
+            sendResourcePutError(clientId, requestId, ResourceError::NOT_FOUND);
+            return;
+        }
+
+        Serial.printf("[MicroProto] RESOURCE_PUT: updated resource %lu\n", resourceId);
+        sendResourcePutOk(clientId, requestId, resourceId);
+
+        // Broadcast updated property to ALL clients (including requester - they need updated header list)
+        broadcastPropertyExcept(prop, NO_EXCLUDE);
+    }
+}
+
+void MicroProtoServer::onResourceDeleteRequest(uint8_t clientId, uint8_t requestId, uint16_t propertyId, uint32_t resourceId) {
+    PropertyBase* prop = PropertyBase::find(static_cast<uint8_t>(propertyId));
+    if (!prop || prop->getTypeId() != TYPE_RESOURCE) {
+        Serial.printf("[MicroProto] RESOURCE_DELETE: property %d not found or not RESOURCE type\n", propertyId);
+        sendResourceDeleteError(clientId, requestId, ResourceError::NOT_FOUND);
+        return;
+    }
+
+    if (!prop->deleteResource(resourceId)) {
+        Serial.printf("[MicroProto] RESOURCE_DELETE: failed to delete resource %lu\n", resourceId);
+        sendResourceDeleteError(clientId, requestId, ResourceError::NOT_FOUND);
+        return;
+    }
+
+    Serial.printf("[MicroProto] RESOURCE_DELETE: deleted resource %lu\n", resourceId);
+    sendResourceDeleteOk(clientId, requestId);
+
+    // Broadcast updated property to all clients
+    broadcastPropertyExcept(prop, clientId);
+}
+
+// =========== Resource Response Helpers ===========
+
+void MicroProtoServer::sendResourceGetOk(uint8_t clientNum, uint8_t requestId,
+                                          const uint8_t* data, size_t len) {
+    WriteBuffer wb(_txBuf, TX_BUFFER_SIZE);
+
+    if (ResourceGetEncoder::encodeResponseOk(wb, requestId, data, len)) {
+        _ws.sendBIN(clientNum, _txBuf, wb.position());
+    }
+}
+
+void MicroProtoServer::sendResourceGetError(uint8_t clientNum, uint8_t requestId, uint8_t errorCode) {
+    uint8_t buf[64];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    if (ResourceGetEncoder::encodeResponseError(wb, requestId, errorCode)) {
+        _ws.sendBIN(clientNum, buf, wb.position());
+    }
+}
+
+void MicroProtoServer::sendResourcePutOk(uint8_t clientNum, uint8_t requestId, uint32_t resourceId) {
+    uint8_t buf[32];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    if (ResourcePutEncoder::encodeResponseOk(wb, requestId, resourceId)) {
+        _ws.sendBIN(clientNum, buf, wb.position());
+    }
+}
+
+void MicroProtoServer::sendResourcePutError(uint8_t clientNum, uint8_t requestId, uint8_t errorCode) {
+    uint8_t buf[64];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    if (ResourcePutEncoder::encodeResponseError(wb, requestId, errorCode)) {
+        _ws.sendBIN(clientNum, buf, wb.position());
+    }
+}
+
+void MicroProtoServer::sendResourceDeleteOk(uint8_t clientNum, uint8_t requestId) {
+    uint8_t buf[16];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    if (ResourceDeleteEncoder::encodeResponseOk(wb, requestId)) {
+        _ws.sendBIN(clientNum, buf, wb.position());
+    }
+}
+
+void MicroProtoServer::sendResourceDeleteError(uint8_t clientNum, uint8_t requestId, uint8_t errorCode) {
+    uint8_t buf[64];
+    WriteBuffer wb(buf, sizeof(buf));
+
+    if (ResourceDeleteEncoder::encodeResponseError(wb, requestId, errorCode)) {
+        _ws.sendBIN(clientNum, buf, wb.position());
+    }
 }
 
 } // namespace MicroProto

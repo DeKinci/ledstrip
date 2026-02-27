@@ -1,4 +1,7 @@
 #include "WiFiMan.h"
+#include <Logger.h>
+
+static const char* TAG = "WiFiMan";
 
 namespace WiFiMan {
 
@@ -56,7 +59,7 @@ void WiFiManager::setHostname(const String& name) {
 }
 
 void WiFiManager::begin() {
-    Serial.println("[WiFiMan] Starting WiFi Manager");
+    LOG_INFO(TAG, "Starting WiFi Manager");
     WiFi.mode(WIFI_STA);
     WiFi.setHostname(hostname.c_str());
 
@@ -71,10 +74,10 @@ void WiFiManager::begin() {
     setupRoutes();
 
     if (creds.getAll().empty()) {
-        Serial.println("[WiFiMan] No credentials stored, starting AP mode");
+        LOG_INFO(TAG, "No credentials stored, starting AP mode");
         transitionToState(State::AP_MODE);
     } else {
-        Serial.printf("[WiFiMan] Found %d saved network(s), starting scan\n", creds.getAll().size());
+        LOG_INFO(TAG, "Found %d saved network(s), starting scan", creds.getAll().size());
         transitionToState(State::SCANNING);
     }
 }
@@ -193,11 +196,11 @@ void WiFiManager::handleScanning() {
         if (!availableNetworks.empty()) {
             transitionToState(State::CONNECTING);
         } else {
-            Serial.println("[WiFiMan] No saved networks are available");
+            LOG_INFO(TAG, "No saved networks are available");
             transitionToState(State::FAILED);
         }
     } else if (millis() - stateStartTime > 10000) {
-        Serial.println("[WiFiMan] Scan timeout");
+        LOG_WARN(TAG, "Scan timeout");
         transitionToState(State::FAILED);
     }
 }
@@ -211,7 +214,7 @@ void WiFiManager::handleConnecting() {
 
     // Check for timeout
     if (millis() - stateStartTime > connectionTimeout) {
-        Serial.println("[WiFiMan] Connection timeout");
+        LOG_WARN(TAG, "Connection timeout");
         ConnectionResult result = tryNextNetwork();
 
         if (result == ConnectionResult::NO_NETWORKS_AVAILABLE ||
@@ -225,7 +228,7 @@ void WiFiManager::handleConnecting() {
 void WiFiManager::handleConnected() {
     // Monitor connection health
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[WiFiMan] Connection lost, rescanning");
+        LOG_WARN(TAG, "Connection lost, rescanning");
         if (disconnectedCallback) {
             disconnectedCallback();
         }
@@ -241,7 +244,7 @@ void WiFiManager::handleAPMode() {
     if (webConnectRequestTime > 0 && millis() - webConnectRequestTime > 100) {
         webConnectRequestTime = 0;
         consecutiveFailures = 0;  // Reset failure counter on manual retry
-        Serial.println("[WiFiMan] Processing web connect request");
+        LOG_INFO(TAG, "Processing web connect request");
         stopAP();
         retry();
         return;
@@ -249,7 +252,7 @@ void WiFiManager::handleAPMode() {
 
     // Check for AP timeout
     if (apTimeout > 0 && millis() - apStartTime > apTimeout) {
-        Serial.println("[WiFiMan] AP timeout, retrying connection");
+        LOG_INFO(TAG, "AP timeout, retrying connection");
         stopAP();
         retry();
     }
@@ -261,18 +264,18 @@ void WiFiManager::handleFailed() {
         consecutiveFailures++;
 
         if (consecutiveFailures >= 3) {
-            Serial.println("[WiFiMan] Too many failures, starting AP mode");
+            LOG_WARN(TAG, "Too many failures, starting AP mode");
             consecutiveFailures = 0;
             transitionToState(State::AP_MODE);
         } else {
-            Serial.printf("[WiFiMan] Retrying connection after failure (attempt %d/3)\n", consecutiveFailures + 1);
+            LOG_INFO(TAG, "Retrying connection after failure (attempt %d/3)", consecutiveFailures + 1);
             retry();
         }
     }
 }
 
 void WiFiManager::startScanning() {
-    Serial.println("[WiFiMan] Starting network scan");
+    LOG_INFO(TAG, "Starting network scan");
     WiFi.scanNetworks(true);  // Async scan
 }
 
@@ -287,13 +290,13 @@ ConnectionResult WiFiManager::tryNextNetwork() {
     currentNetworkIndex++;
 
     if (sortedNetworks.empty() || currentNetworkIndex >= sortedNetworks.size()) {
-        Serial.println("[WiFiMan] No more networks to try");
+        LOG_INFO(TAG, "No more networks to try");
         return sortedNetworks.empty() ? ConnectionResult::NO_CREDENTIALS : ConnectionResult::NO_NETWORKS_AVAILABLE;
     }
 
     NetworkCredential* cred = sortedNetworks[currentNetworkIndex];
-    Serial.printf("[WiFiMan] Attempting connection to '%s' (priority: %d, RSSI: %d)\n",
-                  cred->ssid.c_str(), cred->priority, cred->lastRSSI);
+    LOG_INFO(TAG, "Attempting connection to '%s' (priority: %d, RSSI: %d)",
+             cred->ssid.c_str(), cred->priority, cred->lastRSSI);
 
     // Non-blocking disconnect and connect
     WiFi.disconnect(false, false);  // Don't erase config, don't wait
@@ -307,21 +310,21 @@ void WiFiManager::scanAvailableNetworks() {
     int n = WiFi.scanComplete();
     if (n < 0) return;
 
-    Serial.printf("[WiFiMan] Scan found %d networks\n", n);
+    LOG_INFO(TAG, "Scan found %d networks", n);
 
     // Clear previous available networks
     availableNetworks.clear();
 
     // Print all scanned networks
     for (int i = 0; i < n; i++) {
-        Serial.printf("[WiFiMan]   Scanned: '%s' (RSSI: %d)\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
+        LOG_INFO(TAG, "  Scanned: '%s' (RSSI: %d)", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
     }
 
     // Print all saved networks
     auto allSaved = creds.getAll();
-    Serial.printf("[WiFiMan] Have %d saved network(s):\n", allSaved.size());
+    LOG_INFO(TAG, "Have %d saved network(s):", allSaved.size());
     for (const auto& saved : allSaved) {
-        Serial.printf("[WiFiMan]   Saved: '%s'\n", saved.ssid.c_str());
+        LOG_INFO(TAG, "  Saved: '%s'", saved.ssid.c_str());
     }
 
     // Build list of scanned SSIDs for quick lookup
@@ -337,7 +340,7 @@ void WiFiManager::scanAvailableNetworks() {
 
         if (creds.hasNetwork(ssid)) {
             creds.updateRSSI(ssid, rssi);
-            Serial.printf("[WiFiMan]   Match found: %s (RSSI: %d)\n", ssid.c_str(), rssi);
+            LOG_INFO(TAG, "  Match found: %s (RSSI: %d)", ssid.c_str(), rssi);
         }
     }
 
@@ -358,12 +361,11 @@ void WiFiManager::scanAvailableNetworks() {
         }
     }
 
-    Serial.printf("[WiFiMan] %d saved network(s) are currently available\n",
-                  availableNetworks.size());
+    LOG_INFO(TAG, "%d saved network(s) are currently available", availableNetworks.size());
 
     for (const auto* net : availableNetworks) {
-        Serial.printf("[WiFiMan]   -> %s (Priority: %d, RSSI: %d dBm)\n",
-                     net->ssid.c_str(), net->priority, net->lastRSSI);
+        LOG_INFO(TAG, "  -> %s (Priority: %d, RSSI: %d dBm)",
+                 net->ssid.c_str(), net->priority, net->lastRSSI);
     }
 
     WiFi.scanDelete();
@@ -372,13 +374,13 @@ void WiFiManager::scanAvailableNetworks() {
 void WiFiManager::transitionToState(State newState) {
     if (state == newState) return;
 
-    Serial.printf("[WiFiMan] State transition: %s -> %s\n",
-                  getStateString().c_str(),
-                  newState == State::IDLE ? "IDLE" :
-                  newState == State::SCANNING ? "SCANNING" :
-                  newState == State::CONNECTING ? "CONNECTING" :
-                  newState == State::CONNECTED ? "CONNECTED" :
-                  newState == State::AP_MODE ? "AP_MODE" : "FAILED");
+    LOG_INFO(TAG, "State transition: %s -> %s",
+             getStateString().c_str(),
+             newState == State::IDLE ? "IDLE" :
+             newState == State::SCANNING ? "SCANNING" :
+             newState == State::CONNECTING ? "CONNECTING" :
+             newState == State::CONNECTED ? "CONNECTED" :
+             newState == State::AP_MODE ? "AP_MODE" : "FAILED");
 
     State oldState = state;
     state = newState;
@@ -394,8 +396,8 @@ void WiFiManager::transitionToState(State newState) {
             break;
 
         case State::CONNECTED:
-            Serial.printf("[WiFiMan] Connected to '%s', IP: %s\n",
-                         WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+            LOG_INFO(TAG, "Connected to '%s', IP: %s",
+                     WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
             creds.updateLastConnected(WiFi.SSID(), millis());
             consecutiveFailures = 0;  // Reset failure counter on success
             if (connectedCallback) {
@@ -406,8 +408,8 @@ void WiFiManager::transitionToState(State newState) {
         case State::AP_MODE:
             WiFi.mode(WIFI_AP_STA);  // Use AP_STA to allow scanning while AP is running
             WiFi.softAP(apSSID.c_str(), apPassword.c_str());
-            Serial.printf("[WiFiMan] AP started: %s, IP: %s\n",
-                         apSSID.c_str(), WiFi.softAPIP().toString().c_str());
+            LOG_INFO(TAG, "AP started: %s, IP: %s",
+                     apSSID.c_str(), WiFi.softAPIP().toString().c_str());
 
             // Setup captive portal DNS
             if (!dnsServer) {
@@ -426,7 +428,7 @@ void WiFiManager::transitionToState(State newState) {
             break;
 
         case State::FAILED:
-            Serial.println("[WiFiMan] Failed to connect, will retry or start AP");
+            LOG_WARN(TAG, "Failed to connect, will retry or start AP");
             lastConnectionAttempt = millis();
 
             // If we've never been connected and have no other options, start AP
@@ -445,7 +447,7 @@ void WiFiManager::updateAPClients() {
     uint8_t clientCount = WiFi.softAPgetStationNum();
 
     if (clientCount != lastClientCount) {
-        Serial.printf("[WiFiMan] AP clients: %d\n", clientCount);
+        LOG_INFO(TAG, "AP clients: %d", clientCount);
         lastClientCount = clientCount;
         if (apClientConnectedCallback) {
             apClientConnectedCallback(clientCount);
@@ -456,17 +458,20 @@ void WiFiManager::updateAPClients() {
 void WiFiManager::handleWiFiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
     switch (event) {
         case ARDUINO_EVENT_WIFI_STA_CONNECTED:
-            Serial.println("[WiFiMan] WiFi connected event");
+            LOG_INFO(TAG, "WiFi connected event");
             _lastError = "";  // Clear error on successful connection
             break;
         case ARDUINO_EVENT_WIFI_STA_DISCONNECTED: {
             uint8_t reason = info.wifi_sta_disconnected.reason;
             _lastError = reasonToString(reason);
-            Serial.printf("[WiFiMan] WiFi disconnected, reason: %s (%d)\n", _lastError.c_str(), reason);
+            // Only log when actively trying to connect — suppress background STA noise in AP mode
+            if (state == State::CONNECTING || state == State::CONNECTED || state == State::SCANNING) {
+                LOG_WARN(TAG, "WiFi disconnected, reason: %s (%d)", _lastError.c_str(), reason);
+            }
             break;
         }
         case ARDUINO_EVENT_WIFI_STA_GOT_IP:
-            Serial.println("[WiFiMan] Got IP event");
+            LOG_INFO(TAG, "Got IP event");
             _lastError = "";  // Clear error on getting IP
             break;
         default:

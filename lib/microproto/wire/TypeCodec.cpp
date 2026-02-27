@@ -36,56 +36,22 @@ bool TypeCodec::encodeProperty(WriteBuffer& buf, const PropertyBase* prop) {
     }
 
     if (typeId == TYPE_VARIANT) {
-        // VARIANT: u8 type_index + value bytes
-        // getData() returns just the value, we need to prefix with type index
-        // PropertyBase doesn't expose typeIndex directly, so we check if it's a variant
-        // and access via the concrete type
+        // VARIANT wire format: u8 type_index + value bytes
+        // getData() returns just the value data (no type index)
+        // getVariantTypeIndex() returns the current discriminant
+        uint8_t typeIndex = prop->getVariantTypeIndex();
+        if (!buf.writeByte(typeIndex)) return false;
 
-        // Write the variant data as: type_index (from getElementCount encoding trick) + value
-        // Actually, we need to get the type index from the property
-        // For now, use the fact that VARIANT setData expects [type_index][value]
-        // and we should encode the same way
-
-        // The VariantProperty stores type index separately, so we need to
-        // encode: type_index + value data
-        // We'll trust the prop to give us the right data format
-
-        // For VARIANT, getSize() returns 1 + value_size
-        // getData() returns just the value data
-        // We need the type index which is stored in the property
-
-        // Since PropertyBase doesn't have getVariantTypeIndex(), we encode
-        // the data directly (assuming the property handles this correctly)
-        size_t size = prop->getSize();
+        // Write value data using explicit value size from the variant type definition
+        size_t valueSize = prop->getVariantValueSize(typeIndex);
         const uint8_t* data = static_cast<const uint8_t*>(prop->getData());
-
-        // For a proper VARIANT encode, we need type_index + value
-        // The PropertyBase interface doesn't give us type_index directly
-        // So we write the size bytes as the value data
-        // The VariantProperty overrides getData to return just value,
-        // but getSize() returns 1 + value_size
-
-        // Let's write: getElementCount() as type_index (using it as storage)
-        // Actually, VariantProperty doesn't fit neatly into PropertyBase interface
-        // For MVP, let's just write raw data and handle it specially
-        return buf.writeBytes(data, size);
+        return buf.writeBytes(data, valueSize);
     }
 
     if (typeId == TYPE_RESOURCE) {
-        // RESOURCE: varint count + for each resource: (id, version, size, header_data)
-        // This is complex - resources are a collection with variable encoding
-        // For MVP, encode as: count + packed resource headers
-
-        size_t count = prop->getElementCount();
-        if (buf.writeVarint(static_cast<uint32_t>(count)) == 0) {
-            return false;
-        }
-
-        // Resource encoding is complex and requires iteration
-        // For now, skip actual resource encoding (would need ResourceProperty interface)
-        // The actual encoding would iterate resources and write:
-        // varint id, varint version, varint size, bytes header_data
-        return true;
+        // RESOURCE: varint count + for each resource: (id, version, bodySize, blob headerData)
+        // Delegate to the virtual method which ResourceProperty overrides
+        return prop->encodeResourceHeaders(buf);
     }
 
     // Basic types: direct encoding
@@ -102,8 +68,8 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
         size_t elementSize = prop->getElementSize();
         size_t totalSize = count * elementSize;
 
-        // Temporary buffer for decoding (max reasonable array size)
-        uint8_t temp[256];
+        // Temporary buffer for decoding
+        uint8_t temp[MICROPROTO_DECODE_BUFFER_SIZE];
         if (totalSize > sizeof(temp)) {
             return false;  // Array too large
         }
@@ -122,7 +88,7 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
         size_t elementSize = prop->getElementSize();
 
         // Temporary buffer for decoding
-        uint8_t temp[512];
+        uint8_t temp[MICROPROTO_DECODE_LIST_BUFFER_SIZE];
         size_t maxBytes = maxCount * elementSize;
         if (maxBytes > sizeof(temp)) {
             maxBytes = sizeof(temp);
@@ -143,7 +109,7 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
         size_t size = prop->getSize();
 
         // Temporary buffer for decoding
-        uint8_t temp[256];
+        uint8_t temp[MICROPROTO_DECODE_BUFFER_SIZE];
         if (size > sizeof(temp)) {
             return false;  // Object too large
         }
@@ -158,33 +124,21 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
     }
 
     if (typeId == TYPE_VARIANT) {
-        // VARIANT: u8 type_index + value bytes
-        // For decoding, we need to read type_index first, then value
-        // The value size depends on which type is selected
-
-        // Read type index
+        // VARIANT wire: u8 type_index + value bytes
         uint8_t typeIndex = buf.readUint8();
         if (!buf.ok()) return false;
 
-        // Get the variant type count to validate
         size_t typeCount = prop->getElementCount();
         if (typeIndex >= typeCount) return false;
 
-        // For MVP, read the remaining bytes as the value
-        // Actual size depends on the type definition
-        // We'd need access to VariantTypeDef to know the size
+        // Get value size from the type definition at this index
+        size_t valueSize = prop->getVariantValueSize(typeIndex);
 
-        // Temporary buffer: type_index + value
-        uint8_t temp[128];
+        // Temporary buffer: [type_index][value]
+        uint8_t temp[MICROPROTO_DECODE_BUFFER_SIZE];
+        if (1 + valueSize > sizeof(temp)) return false;
+
         temp[0] = typeIndex;
-
-        // Read value based on expected size
-        // For now, use getSize() - 1 as value size (rough approximation)
-        size_t valueSize = prop->getSize() - 1;
-        if (valueSize + 1 > sizeof(temp)) {
-            return false;
-        }
-
         if (valueSize > 0 && !buf.readBytes(temp + 1, valueSize)) {
             return false;
         }
@@ -194,12 +148,9 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
     }
 
     if (typeId == TYPE_RESOURCE) {
-        // RESOURCE: Property updates only contain headers
-        // varint count + for each: (varint id, varint version, varint size, header_data)
-        // Resource properties are read-only via PROPERTY_UPDATE
-        // Actual modifications go through RESOURCE_PUT/DELETE
-        // For decode, we skip this as it's handled specially
-        return true;
+        // Resources are read-only — clients cannot send resource updates via PROPERTY_UPDATE.
+        // Reject to prevent silent buffer position corruption in batched messages.
+        return false;
     }
 
     // Basic types
@@ -220,6 +171,83 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
     }
 
     prop->setData(&temp, size);
+    return true;
+}
+
+bool TypeCodec::decodeInto(ReadBuffer& buf, const PropertyBase* prop,
+                           uint8_t* outBuf, size_t outBufSize, size_t& decodedSize) {
+    uint8_t typeId = prop->getTypeId();
+
+    if (typeId == TYPE_ARRAY) {
+        size_t count = prop->getElementCount();
+        size_t elementSize = prop->getElementSize();
+        size_t totalSize = count * elementSize;
+        if (totalSize > outBufSize) return false;
+
+        if (!decodeArray(buf, prop->getElementTypeId(), outBuf, count, elementSize)) {
+            return false;
+        }
+        decodedSize = totalSize;
+        return true;
+    }
+
+    if (typeId == TYPE_LIST) {
+        size_t maxCount = prop->getMaxElementCount();
+        size_t elementSize = prop->getElementSize();
+        size_t maxBytes = maxCount * elementSize;
+        if (maxBytes > outBufSize) {
+            maxBytes = outBufSize;
+            maxCount = maxBytes / elementSize;
+        }
+
+        size_t actualCount = 0;
+        if (!decodeList(buf, prop->getElementTypeId(), outBuf, maxCount, elementSize, actualCount)) {
+            return false;
+        }
+        decodedSize = actualCount * elementSize;
+        return true;
+    }
+
+    if (typeId == TYPE_OBJECT) {
+        size_t size = prop->getSize();
+        if (size > outBufSize) return false;
+
+        if (!buf.readBytes(outBuf, size)) return false;
+        decodedSize = size;
+        return true;
+    }
+
+    if (typeId == TYPE_VARIANT) {
+        uint8_t typeIndex = buf.readUint8();
+        if (!buf.ok()) return false;
+
+        size_t typeCount = prop->getElementCount();
+        if (typeIndex >= typeCount) return false;
+
+        size_t valueSize = prop->getVariantValueSize(typeIndex);
+        if (1 + valueSize > outBufSize) return false;
+
+        outBuf[0] = typeIndex;
+        if (valueSize > 0 && !buf.readBytes(outBuf + 1, valueSize)) {
+            return false;
+        }
+        decodedSize = 1 + valueSize;
+        return true;
+    }
+
+    if (typeId == TYPE_RESOURCE) {
+        // Resources are read-only — clients cannot send resource updates via PROPERTY_UPDATE.
+        return false;
+    }
+
+    // Basic types
+    size_t size = prop->getSize();
+    if (size > outBufSize) return false;
+
+    if (!decodeBasic(buf, typeId, outBuf, size)) {
+        return false;
+    }
+    decodedSize = size;
     return true;
 }
 

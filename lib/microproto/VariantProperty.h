@@ -307,6 +307,15 @@ public:
         return TypeCount;
     }
 
+    uint8_t getVariantTypeIndex() const override {
+        return _currentType;
+    }
+
+    size_t getVariantValueSize(uint8_t typeIndex) const override {
+        if (typeIndex >= TypeCount) return 0;
+        return _types[typeIndex].size;
+    }
+
     /**
      * Get type definitions for schema encoding
      */

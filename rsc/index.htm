@@ -297,7 +297,7 @@
             <div id="editor">-- Rainbow example
 function draw(led_count)
     for i = 0, led_count - 1 do
-        hsv(i, env.millis / 10 + i * 5, 255, 255)
+        hsv(i, env.millis / 10 + i * 5, 1, env.brightness)
     end
 end</div>
         </div>
@@ -313,9 +313,10 @@ end</div>
         editor.setOptions({ fontSize: '13px' });
 
         // State
-        let shaders = [];
+        let shaders = [];  // [{id, name, version, bodySize}]
         let currentShaderIndex = 0;
         let properties = new Map();
+        let shadersSchema = null;  // Schema for shaders RESOURCE property
 
         // MicroProto client
         const wsUrl = `ws://${location.hostname}:81`;
@@ -335,6 +336,12 @@ end</div>
         // Build controls from schema (upsert - replace if exists)
         client.on('schema', (prop) => {
             properties.set(prop.name, prop);
+
+            // Store shaders schema for resource operations
+            if (prop.name === 'shaders') {
+                shadersSchema = prop;
+                return;
+            }
 
             // Skip hidden or special properties (shaderIndex managed by shader list)
             if (prop.hidden || prop.name === 'ledPreview' || prop.name === 'shaderIndex') return;
@@ -359,14 +366,34 @@ end</div>
             } else if (name === 'shaderIndex') {
                 currentShaderIndex = value;
                 updateShaderSelection();
+            } else if (name === 'shaders') {
+                // RESOURCE property: value is array of {id, version, bodySize, header}
+                // header is the shader name (decoded based on headerTypeDef)
+                shaders = (value || []).map(r => ({
+                    id: r.id,
+                    name: decodeResourceHeader(r.header),
+                    version: r.version,
+                    bodySize: r.bodySize
+                }));
+                renderShaderList();
             } else {
                 updateControlValue(name, value);
             }
         });
 
+        // Decode resource header to string (LIST<UINT8> -> string)
+        function decodeResourceHeader(header) {
+            if (typeof header === 'string') return header;
+            if (Array.isArray(header)) {
+                // Convert byte array to string
+                return String.fromCharCode(...header.filter(b => b !== 0));
+            }
+            return String(header || '');
+        }
+
         client.on('ready', () => {
             console.log('MicroProto ready');
-            loadShaders();
+            // Shaders are now loaded automatically via the 'shaders' RESOURCE property
         });
 
         client.connect();
@@ -471,52 +498,44 @@ end</div>
                 }
             }
 
-            // Update colors
+            // Update colors — boost dim values so low-brightness LEDs are still visible
+            // (real LEDs are visibly bright even at low values; screens show near-black)
             const leds = container.children;
             for (let i = 0; i < ledCount; i++) {
                 const r = rgbArray[i * 3];
                 const g = rgbArray[i * 3 + 1];
                 const b = rgbArray[i * 3 + 2];
-                leds[i].style.backgroundColor = `rgb(${r},${g},${b})`;
-            }
-        }
-
-        // Shader management
-        async function loadShaders() {
-            try {
-                const [listRes, showRes] = await Promise.all([
-                    fetch('/api/shader').then(r => r.json()),
-                    fetch('/api/show').then(r => r.json())
-                ]);
-
-                shaders = listRes.shader || [];
-                renderShaderList();
-
-                // Get current index from show endpoint if name matches
-                if (showRes.name) {
-                    const idx = shaders.indexOf(showRes.name);
-                    if (idx >= 0) currentShaderIndex = idx;
+                const max = Math.max(r, g, b);
+                if (max > 0) {
+                    // Lift minimum brightness to ~30% so colors stay visible
+                    const boost = Math.max(1, 80 / max);
+                    const dr = Math.min(255, Math.round(r * boost));
+                    const dg = Math.min(255, Math.round(g * boost));
+                    const db = Math.min(255, Math.round(b * boost));
+                    leds[i].style.backgroundColor = `rgb(${dr},${dg},${db})`;
+                } else {
+                    leds[i].style.backgroundColor = `rgb(0,0,0)`;
                 }
-                updateShaderSelection();
-            } catch (e) {
-                console.error('Failed to load shaders:', e);
             }
         }
+
+        // Shader management using MicroProto RESOURCE operations
 
         function renderShaderList() {
             const container = document.getElementById('shaderList');
             container.innerHTML = '';
 
-            shaders.forEach((name, index) => {
+            shaders.forEach((shader, index) => {
                 const item = document.createElement('div');
                 item.className = 'shader-item';
                 item.dataset.index = index;
+                item.dataset.resourceId = shader.id;
                 item.innerHTML = `
                     <div class="shader-check"></div>
-                    <span class="shader-name">${name}</span>
+                    <span class="shader-name">${shader.name}</span>
                     <div class="shader-actions">
-                        <button class="btn btn-sm btn-warning" onclick="editShader('${name}')">Edit</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteShader('${name}')">Del</button>
+                        <button class="btn btn-sm btn-warning" onclick="editShader(${shader.id}, '${shader.name}')">Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="deleteShader(${shader.id}, '${shader.name}')">Del</button>
                     </div>
                 `;
                 item.onclick = (e) => {
@@ -526,6 +545,8 @@ end</div>
                 };
                 container.appendChild(item);
             });
+
+            updateShaderSelection();
         }
 
         function updateShaderSelection() {
@@ -537,70 +558,83 @@ end</div>
 
         function selectShader(index) {
             if (index === currentShaderIndex) return;
-
-            // Update via MicroProto property
+            // Update via MicroProto property - this triggers animation change
             client.setProperty('shaderIndex', index);
-
-            // Also call HTTP endpoint for immediate feedback
-            const name = shaders[index];
-            if (name) {
-                fetch(`/api/show/${encodeURIComponent(name)}`);
-            }
         }
 
-        async function editShader(name) {
+        async function editShader(resourceId, name) {
             try {
-                const res = await fetch(`/api/shader/${encodeURIComponent(name)}`);
-                const data = await res.json();
                 document.getElementById('shaderName').value = name;
-                editor.setValue(data.shader || '', -1);
+                document.getElementById('shaderName').dataset.resourceId = resourceId;
+
+                // Fetch shader body via MicroProto RESOURCE_GET
+                const result = await client.getResource('shaders', resourceId);
+                if (result && result.data) {
+                    // result.data is Uint8Array, decode to string
+                    const code = new TextDecoder().decode(result.data);
+                    editor.setValue(code, -1);
+                }
             } catch (e) {
                 console.error('Failed to load shader:', e);
+                alert('Failed to load shader: ' + e.message);
             }
         }
 
-        async function deleteShader(name) {
+        async function deleteShader(resourceId, name) {
             if (!confirm(`Delete shader "${name}"?`)) return;
 
             try {
-                await fetch(`/api/shader/${encodeURIComponent(name)}`, { method: 'DELETE' });
-                await loadShaders();
+                await client.deleteResource('shaders', resourceId);
+                // Shader list will auto-update via property change
             } catch (e) {
                 console.error('Failed to delete shader:', e);
+                alert('Failed to delete: ' + e.message);
             }
         }
 
         async function saveShader() {
-            const name = document.getElementById('shaderName').value.trim();
+            const nameInput = document.getElementById('shaderName');
+            const name = nameInput.value.trim();
             if (!name) {
                 alert('Enter a shader name');
                 return;
             }
 
             try {
-                const res = await fetch('/api/shader', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, shader: editor.getValue() })
+                // Encode name and code as byte arrays
+                const headerBytes = new TextEncoder().encode(name);
+                const bodyBytes = new TextEncoder().encode(editor.getValue());
+
+                // Check if updating existing or creating new
+                const existingId = parseInt(nameInput.dataset.resourceId) || 0;
+
+                // Use putResource - resourceId=0 for new, existing ID for update
+                const result = await client.putResource('shaders', existingId, {
+                    header: headerBytes,
+                    body: bodyBytes
                 });
 
-                if (res.ok) {
-                    await loadShaders();
-                } else {
-                    const err = await res.json();
-                    alert(err.error || 'Failed to save');
+                // Store the new resource ID
+                if (result && result.resourceId) {
+                    nameInput.dataset.resourceId = result.resourceId;
                 }
+
+                // Shader list will auto-update via property change
+                console.log('Shader saved:', result);
             } catch (e) {
                 console.error('Failed to save shader:', e);
+                alert('Failed to save: ' + e.message);
             }
         }
 
         function newShader() {
-            document.getElementById('shaderName').value = '';
+            const nameInput = document.getElementById('shaderName');
+            nameInput.value = '';
+            nameInput.dataset.resourceId = '0';  // Clear resource ID for new shader
             editor.setValue(`-- New shader
 function draw(led_count)
     for i = 0, led_count - 1 do
-        hsv(i, env.millis / 10 + i * 5, 255, 255)
+        hsv(i, env.millis / 10 + i * 5, 1, env.brightness)
     end
 end`, -1);
         }

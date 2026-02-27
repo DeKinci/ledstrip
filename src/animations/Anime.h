@@ -5,7 +5,6 @@
 #include <vector>
 #include <array>
 
-#include "core/ShaderStorage.h"
 #include "LuaAnimation.h"
 
 #define CACHE_SIZE 1

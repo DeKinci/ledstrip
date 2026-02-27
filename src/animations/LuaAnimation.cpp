@@ -48,11 +48,15 @@ int lua_set_rgb(lua_State *L) {
     return 0;
 }
 
+// hsv(index, hue, saturation, value)
+//   hue: 0..255 (maps to FastLED hue wheel)
+//   saturation: 0..1
+//   value: 0..1
 int lua_set_hsv(lua_State *L) {
     int index = static_cast<int>(lua_tointeger(L, 1));
     uint8_t h = clamp_byte(lua_tonumber(L, 2));
-    uint8_t s = clamp_byte(lua_tonumber(L, 3));
-    uint8_t v = clamp_byte(lua_tonumber(L, 4));
+    uint8_t s = static_cast<uint8_t>(fmin(fmax(lua_tonumber(L, 3), 0.0), 1.0) * 255);
+    uint8_t v = static_cast<uint8_t>(fmin(fmax(lua_tonumber(L, 4), 0.0), 1.0) * 255);
     if (leds_buffer && index >= 0) {
         leds_buffer[index] = CHSV(h, s, v);
     }

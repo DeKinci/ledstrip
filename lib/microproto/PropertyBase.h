@@ -492,6 +492,8 @@ public:
     virtual size_t getElementSize() const { return 0; }
     virtual size_t getElementCount() const { return 0; }  // ARRAY: fixed count, LIST: current count
     virtual size_t getMaxElementCount() const { return 0; }  // LIST: max capacity
+    virtual uint8_t getVariantTypeIndex() const { return 0; }  // VARIANT: current type index
+    virtual size_t getVariantValueSize(uint8_t typeIndex) const { return 0; }  // VARIANT: size of type at index
 
     // Constraint access (overridden by Property/ArrayProperty/ListProperty)
     virtual const ValueConstraints* getValueConstraints() const { return nullptr; }
@@ -505,6 +507,29 @@ public:
     // Schema encoding - encode DATA_TYPE_DEFINITION for this property's type
     // Uses compile-time type info via template visitor pattern
     virtual bool encodeTypeDefinition(WriteBuffer& buf) const = 0;
+
+    // Resource encoding - override in ResourceProperty to encode all headers
+    // Wire format: varint count + for each: (varint id, varint version, varint bodySize, blob headerData)
+    virtual bool encodeResourceHeaders(WriteBuffer& buf) const { return false; }
+
+    // =========== Resource Operations (override in ResourceProperty) ===========
+
+    // Read resource body into buffer, returns bytes read (0 on failure)
+    virtual size_t readResourceBody(uint32_t resourceId, void* buffer, size_t bufferSize) const { return 0; }
+
+    // Get resource body size (0 if not found)
+    virtual size_t getResourceBodySize(uint32_t resourceId) const { return 0; }
+
+    // Create new resource, returns resourceId (0 on failure)
+    virtual uint32_t createResource(const void* headerData, size_t headerLen,
+                                     const void* bodyData, size_t bodyLen) { return 0; }
+
+    // Update existing resource header and/or body
+    virtual bool updateResourceHeader(uint32_t resourceId, const void* headerData, size_t headerLen) { return false; }
+    virtual bool updateResourceBody(uint32_t resourceId, const void* bodyData, size_t bodyLen) { return false; }
+
+    // Delete resource
+    virtual bool deleteResource(uint32_t resourceId) { return false; }
 
     // Persistence - virtual methods for NVS storage
     // Default implementation uses PropertyStorage::save/load with getData()/setData()

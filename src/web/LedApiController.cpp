@@ -4,109 +4,12 @@
 #include <HttpRequest.h>
 #include <HttpResponse.h>
 
-#include "animations/Anime.h"
-#include "core/ShaderStorage.h"
 #include "ble/BleDeviceManager.hpp"
 
 namespace LedApiController {
 
 void registerRoutes(HttpDispatcher& dispatcher) {
-    // GET /api/shader - List all shaders
-    dispatcher.onGet("/api/shader", [](HttpRequest& req) {
-        auto result = ShaderStorage::get().listShaders();
-        if (result.hasError()) {
-            JsonDocument doc;
-            doc["error"] = result.getMessage();
-            return HttpResponse::json(doc, result.getCode());
-        }
-
-        JsonDocument doc;
-        JsonArray names = doc["shader"].to<JsonArray>();
-        for (const String& name : result.getValue()) {
-            names.add(name);
-        }
-        return HttpResponse::json(doc);
-    });
-
-    // POST /api/shader - Add new shader
-    dispatcher.onPost("/api/shader", [](HttpRequest& req) {
-        JsonDocument doc;
-        if (!req.json(doc)) {
-            return HttpResponse::json("{\"error\":\"Invalid JSON\"}", 400);
-        }
-
-        String name = doc["name"].as<String>();
-        String shader = doc["shader"].as<String>();
-
-        if (name.isEmpty() || shader.isEmpty()) {
-            return HttpResponse::json("{\"error\":\"Missing name or shader\"}", 400);
-        }
-
-        Serial.printf("[API] onAddShader: %s (%d bytes)\n", name.c_str(), shader.length());
-
-        auto storeResult = ShaderStorage::get().storeShader(name, shader);
-        if (storeResult.hasError()) {
-            JsonDocument errDoc;
-            errDoc["error"] = storeResult.getMessage();
-            return HttpResponse::json(errDoc, storeResult.getCode());
-        }
-
-        Anime::scheduleReload();
-        return HttpResponse::json("{\"success\":true}");
-    });
-
-    // GET /api/shader/{name} - Get shader source
-    dispatcher.onGet("/api/shader/{name}", [](HttpRequest& req) {
-        String name = req.pathParam("name").toString();
-
-        auto result = ShaderStorage::get().getShader(name);
-        if (result.hasError()) {
-            JsonDocument doc;
-            doc["error"] = result.getMessage();
-            return HttpResponse::json(doc, result.getCode());
-        }
-
-        JsonDocument doc;
-        doc["shader"] = result.getValue();
-        return HttpResponse::json(doc);
-    });
-
-    // DELETE /api/shader/{name} - Delete shader
-    dispatcher.onDelete("/api/shader/{name}", [](HttpRequest& req) {
-        String name = req.pathParam("name").toString();
-
-        if (ShaderStorage::get().deleteShader(name)) {
-            Anime::scheduleReload();
-            return HttpResponse::json("{\"success\":true}");
-        } else {
-            return HttpResponse::json("{\"error\":\"Shader not found\"}", 404);
-        }
-    });
-
-    // GET /api/show - Get current animation info
-    dispatcher.onGet("/api/show", [](HttpRequest& req) {
-        JsonDocument doc;
-        doc["name"] = Anime::getCurrent();
-        doc["ledLimit"] = Anime::getCurrentLeds();
-        doc["shaderCount"] = Anime::getShaderCount();
-        return HttpResponse::json(doc);
-    });
-
-    // GET /api/show/{name} - Select animation by name
-    dispatcher.onGet("/api/show/{name}", [](HttpRequest& req) {
-        String name = req.pathParam("name").toString();
-
-        auto result = Anime::select(name);
-        if (result.hasError()) {
-            JsonDocument doc;
-            doc["error"] = result.getMessage();
-            return HttpResponse::json(doc, result.getCode());
-        }
-
-        return HttpResponse::json("{\"success\":true}");
-    });
-
-    Serial.println("[LedApiController] Shader routes registered");
+    // Shader routes removed - now handled via MicroProto RESOURCE operations
 
     // ============== BLE Routes ==============
 

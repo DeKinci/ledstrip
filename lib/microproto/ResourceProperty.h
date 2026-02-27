@@ -100,7 +100,7 @@ public:
      * Returns resource ID (>0) on success, 0 on failure
      */
     uint32_t createResource(const void* headerData, size_t headerLen,
-                            const void* bodyData, size_t bodyLen) {
+                            const void* bodyData, size_t bodyLen) override {
         size_t slot = findEmptySlot();
         if (slot == MaxResources) return 0;
 
@@ -151,7 +151,7 @@ public:
         return true;
     }
 
-    bool deleteResource(uint32_t resourceId) {
+    bool deleteResource(uint32_t resourceId) override {
         size_t slot = findSlotById(resourceId);
         if (slot == MaxResources) return false;
 
@@ -244,20 +244,99 @@ public:
     size_t getHeaderDataSize() const { return HeaderDataSize; }
 
     // Schema encoding for RESOURCE type
-    // Note: For basic types only - use TypedResourceProperty for complex types
+    // Encodes full recursive DATA_TYPE_DEFINITION for header and body types
     bool encodeTypeDefinition(WriteBuffer& buf) const override {
-        // RESOURCE: type_id(0x24) + header_type_def + body_type_def
+        // RESOURCE: type_id(0x24) + header DATA_TYPE_DEFINITION + body DATA_TYPE_DEFINITION
         if (!buf.writeByte(TYPE_RESOURCE)) return false;
 
-        // Header type definition (basic type + validation_flags)
-        if (!buf.writeByte(_headerType.typeId)) return false;
-        if (!buf.writeByte(0)) return false;  // validation_flags = 0 (no constraints)
+        // Header type definition (full recursive encoding)
+        if (!encodeResourceTypeDef(buf, _headerType)) return false;
 
-        // Body type definition (basic type + validation_flags)
-        if (!buf.writeByte(_bodyType.typeId)) return false;
-        if (!buf.writeByte(0)) return false;  // validation_flags = 0 (no constraints)
+        // Body type definition (full recursive encoding)
+        if (!encodeResourceTypeDef(buf, _bodyType)) return false;
 
         return true;
+    }
+
+    // Encode a ResourceTypeDef as a full DATA_TYPE_DEFINITION
+    bool encodeResourceTypeDef(WriteBuffer& buf, const ResourceTypeDef& rtd) const {
+        if (!buf.writeByte(rtd.typeId)) return false;
+
+        if (rtd.typeId == TYPE_LIST) {
+            // LIST: length_constraints + element DATA_TYPE_DEFINITION
+            // Length constraints: flags byte (bit0=hasMinLength, bit1=hasMaxLength)
+            if (rtd.size > 0) {
+                if (!buf.writeByte(0x02)) return false;  // flags: hasMaxLength (bit1)
+                if (buf.writeVarint(rtd.size) == 0) return false;
+            } else {
+                if (!buf.writeByte(0x00)) return false;  // flags: no constraints
+            }
+            // Element type: UINT8 (byte array)
+            if (!buf.writeByte(TYPE_UINT8)) return false;
+            if (!buf.writeByte(0x00)) return false;  // element validation_flags = 0
+        } else if (rtd.typeId == TYPE_ARRAY) {
+            // ARRAY: varint(element_count) + element DATA_TYPE_DEFINITION
+            if (buf.writeVarint(rtd.size) == 0) return false;
+            // Element type: UINT8
+            if (!buf.writeByte(TYPE_UINT8)) return false;
+            if (!buf.writeByte(0x00)) return false;  // element validation_flags = 0
+        } else {
+            // Basic type: validation_flags only
+            if (!buf.writeByte(0x00)) return false;  // validation_flags = 0
+        }
+        return true;
+    }
+
+    // Encode all resource headers for PROPERTY_UPDATE
+    // Wire format: varint count + for each: (varint id, varint version, varint bodySize, header_value)
+    // header_value is encoded as LIST<UINT8>: varint(len) + bytes
+    bool encodeResourceHeaders(WriteBuffer& buf) const override {
+        // Write count
+        if (buf.writeVarint(static_cast<uint32_t>(_count)) == 0) {
+            return false;
+        }
+
+        // Write each valid resource header
+        for (size_t i = 0; i < MaxResources; i++) {
+            if (!_headers[i].valid) continue;
+
+            if (buf.writeVarint(_headers[i].id) == 0) return false;
+            if (buf.writeVarint(_headers[i].version) == 0) return false;
+            if (buf.writeVarint(_headers[i].bodySize) == 0) return false;
+
+            // Write header data as LIST<UINT8>: varint(actual_length) + bytes
+            // Find actual string length (up to null terminator or HeaderDataSize)
+            size_t actualLen = 0;
+            const uint8_t* data = _headerData[i].data();
+            while (actualLen < HeaderDataSize && data[actualLen] != 0) {
+                actualLen++;
+            }
+            if (buf.writeVarint(static_cast<uint32_t>(actualLen)) == 0) return false;
+            if (!buf.writeBytes(data, actualLen)) return false;
+        }
+
+        return true;
+    }
+
+    // =========== PropertyBase Resource Operations ===========
+
+    size_t readResourceBody(uint32_t resourceId, void* buffer, size_t bufferSize) const override {
+        return readBody(resourceId, buffer, bufferSize);
+    }
+
+    size_t getResourceBodySize(uint32_t resourceId) const override {
+        return getBodySize(resourceId);
+    }
+
+    // createResource and deleteResource are already defined above with matching signatures
+    // They just need override keyword added to those original declarations
+
+    bool updateResourceHeader(uint32_t resourceId, const void* headerData, size_t headerLen) override {
+        return updateHeader(resourceId, headerData, headerLen);
+    }
+
+    bool updateResourceBody(uint32_t resourceId, const void* bodyData, size_t bodyLen) override {
+        return updateBody(resourceId, bodyData, bodyLen);
     }
 
     // =========== NVS Persistence ===========
@@ -482,7 +561,7 @@ public:
         return true;
     }
 
-    bool deleteResource(uint32_t resourceId) {
+    bool deleteResource(uint32_t resourceId) override {
         size_t slot = findSlotById(resourceId);
         if (slot == MaxResources) return false;
 
@@ -566,6 +645,75 @@ public:
 
         return true;
     }
+
+    // Encode all resource headers for PROPERTY_UPDATE
+    // Wire format: varint count + for each: (varint id, varint version, varint bodySize, blob headerData)
+    bool encodeResourceHeaders(WriteBuffer& buf) const override {
+        // Write count
+        if (buf.writeVarint(static_cast<uint32_t>(_count)) == 0) {
+            return false;
+        }
+
+        // Write each valid resource header
+        for (size_t i = 0; i < MaxResources; i++) {
+            if (!_headers[i].valid) continue;
+
+            if (buf.writeVarint(_headers[i].id) == 0) return false;
+            if (buf.writeVarint(_headers[i].version) == 0) return false;
+            if (buf.writeVarint(_headers[i].bodySize) == 0) return false;
+
+            // Write header data as blob (varint length + bytes)
+            if (!buf.writeBlob(reinterpret_cast<const uint8_t*>(&_headerData[i]), sizeof(HeaderT))) return false;
+        }
+
+        return true;
+    }
+
+    // =========== PropertyBase Resource Operations ===========
+
+    size_t readResourceBody(uint32_t resourceId, void* buffer, size_t bufferSize) const override {
+        BodyT body;
+        if (!readBody(resourceId, body)) return 0;
+        size_t copySize = (bufferSize < sizeof(BodyT)) ? bufferSize : sizeof(BodyT);
+        memcpy(buffer, &body, copySize);
+        return copySize;
+    }
+
+    size_t getResourceBodySize(uint32_t resourceId) const override {
+        const ResourceHeader* hdr = getHeader(resourceId);
+        return hdr ? hdr->bodySize : 0;
+    }
+
+    uint32_t createResource(const void* headerData, size_t headerLen,
+                            const void* bodyData, size_t bodyLen) override {
+        HeaderT header{};
+        BodyT body{};
+        if (headerLen > 0 && headerData) {
+            memcpy(&header, headerData, (headerLen < sizeof(HeaderT)) ? headerLen : sizeof(HeaderT));
+        }
+        if (bodyLen > 0 && bodyData) {
+            memcpy(&body, bodyData, (bodyLen < sizeof(BodyT)) ? bodyLen : sizeof(BodyT));
+        }
+        return TypedResourceProperty::createResource(header, body);
+    }
+
+    bool updateResourceHeader(uint32_t resourceId, const void* headerData, size_t headerLen) override {
+        HeaderT header{};
+        if (headerLen > 0 && headerData) {
+            memcpy(&header, headerData, (headerLen < sizeof(HeaderT)) ? headerLen : sizeof(HeaderT));
+        }
+        return updateHeader(resourceId, header);
+    }
+
+    bool updateResourceBody(uint32_t resourceId, const void* bodyData, size_t bodyLen) override {
+        BodyT body{};
+        if (bodyLen > 0 && bodyData) {
+            memcpy(&body, bodyData, (bodyLen < sizeof(BodyT)) ? bodyLen : sizeof(BodyT));
+        }
+        return updateBody(resourceId, body);
+    }
+
+    // deleteResource is already defined above with override
 
     // =========== NVS Persistence ===========
 

@@ -10,7 +10,7 @@ DirtySet PropertySystem::_dirty;
 DirtySet PropertySystem::_persistDirty;
 uint32_t PropertySystem::_lastPersistTime[MAX_PROPERTIES] = {0};
 uint8_t PropertySystem::_numProperties = 0;
-std::array<PropertySystem::FlushCallback, MICROPROTO_MAX_FLUSH_CALLBACKS> PropertySystem::_flushCallbacks;
+std::array<FlushListener*, MICROPROTO_MAX_FLUSH_LISTENERS> PropertySystem::_flushListeners = {};
 
 void PropertySystem::init() {
     _dirty.clearAll();
@@ -41,19 +41,24 @@ uint8_t PropertySystem::getPropertyCount() {
     return _numProperties;
 }
 
-int8_t PropertySystem::onFlush(FlushCallback callback) {
-    for (size_t i = 0; i < _flushCallbacks.size(); ++i) {
-        if (!_flushCallbacks[i]) {
-            _flushCallbacks[i] = callback;
-            return static_cast<int8_t>(i);
+bool PropertySystem::addFlushListener(FlushListener* listener) {
+    if (!listener) return false;
+
+    for (auto& slot : _flushListeners) {
+        if (!slot) {
+            slot = listener;
+            return true;
         }
     }
-    return -1;
+    return false;
 }
 
-void PropertySystem::removeFlushCallback(int8_t slot) {
-    if (slot >= 0 && static_cast<size_t>(slot) < _flushCallbacks.size()) {
-        _flushCallbacks[slot].clear();
+void PropertySystem::removeFlushListener(FlushListener* listener) {
+    for (auto& slot : _flushListeners) {
+        if (slot == listener) {
+            slot = nullptr;
+            return;
+        }
     }
 }
 

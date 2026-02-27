@@ -235,11 +235,12 @@ class MicroProtoClient {
 
         const payload = this._pingPayload++;
 
-        const buf = new ArrayBuffer(5);
-        const view = new DataView(buf);
-        // PING request: opcode=0x6, flags=0 (is_response=0)
-        view.setUint8(0, MicroProtoClient.OPCODES.PING);
-        view.setUint32(1, payload, true);
+        // PING request: opcode=0x6, flags=0 (is_response=0) + varint payload
+        const payloadBytes = this._encodeVarint(payload);
+        const buf = new ArrayBuffer(1 + payloadBytes.length);
+        const bytes = new Uint8Array(buf);
+        bytes[0] = MicroProtoClient.OPCODES.PING;
+        bytes.set(payloadBytes, 1);
 
         this.ws.send(buf);
 
@@ -393,7 +394,7 @@ class MicroProtoClient {
         // varint session_id
         // varint server_timestamp
         if (data.length < 4) {
-            this._log('Invalid HELLO response: too short');
+            this._emit('error', { code: MicroProtoClient.ERROR_CODES.BUFFER_OVERFLOW, message: 'HELLO response too short' });
             return;
         }
 
@@ -468,7 +469,8 @@ class MicroProtoClient {
         const persistent = !!(itemType & 0x20);
         const hidden = !!(itemType & 0x40);
 
-        if (propType !== 1) {  // PROPERTY
+        if (propType !== 1) {  // Only PROPERTY (1) supported in MVP
+            this._emit('error', { code: MicroProtoClient.ERROR_CODES.NOT_IMPLEMENTED, message: `Unsupported schema item type: ${propType}` });
             return null;
         }
 
@@ -483,11 +485,13 @@ class MicroProtoClient {
             groupId = data[offset++];
         }
 
-        // Item ID
-        const id = data[offset++];
+        // Item ID (propid encoding: 1-2 bytes)
+        const [id, idBytes] = this._decodePropId(data, offset);
+        offset += idBytes;
 
-        // Namespace ID
-        const namespaceId = data[offset++];
+        // Namespace ID (propid encoding: 1-2 bytes)
+        const [namespaceId, nsBytes] = this._decodePropId(data, offset);
+        offset += nsBytes;
 
         // Name
         const nameLen = data[offset++];
@@ -730,14 +734,14 @@ class MicroProtoClient {
     // Returns: { constraints: {...}, newOffset }
     _parseValidationConstraints(data, offset, typeId) {
         const view = new DataView(data.buffer, data.byteOffset);
-        const constraints = { hasMin: false, hasMax: false, hasStep: false };
+        const constraints = { hasMin: false, hasMax: false, hasStep: false, hasOneOf: false };
 
         if (offset >= data.length) return { constraints, newOffset: offset };
 
         const flags = data[offset++];
         const typeSize = this._getBasicTypeSize(typeId);
 
-        // flags: bit 0 = hasMin, bit 1 = hasMax, bit 2 = hasStep
+        // flags: bit 0 = hasMin, bit 1 = hasMax, bit 2 = hasStep, bit 3 = hasOneOf
         if (flags & 0x01) {
             constraints.hasMin = true;
             const [val] = this._decodeValue(view, offset, typeId);
@@ -755,6 +759,17 @@ class MicroProtoClient {
             const [val] = this._decodeValue(view, offset, typeId);
             constraints.step = val;
             offset += typeSize;
+        }
+        if (flags & 0x08) {
+            constraints.hasOneOf = true;
+            const [count, countBytes] = this._decodeVarint(data, offset);
+            offset += countBytes;
+            constraints.oneOf = [];
+            for (let i = 0; i < count; i++) {
+                const [val] = this._decodeValue(view, offset, typeId);
+                constraints.oneOf.push(val);
+                offset += typeSize;
+            }
         }
 
         return { constraints, newOffset: offset };
@@ -872,8 +887,9 @@ class MicroProtoClient {
 
             const prop = this.properties.get(propId);
             if (!prop) {
-                this._log('Unknown property:', propId);
-                continue;
+                this._emit('error', { code: MicroProtoClient.ERROR_CODES.INVALID_PROPERTY_ID, message: `Unknown property ${propId} in update` });
+                // Cannot continue — unknown type means unknown wire size, rest of batch is unreadable
+                return;
             }
 
             const [value, bytesRead] = this._decodePropertyValue(view, data, offset, prop);
@@ -1089,9 +1105,16 @@ class MicroProtoClient {
 
         if (success) {
             if (hasReturnValue) {
-                // TODO: Decode return value based on function schema
-                const returnData = data.slice(offset);
-                pending.resolve({ success: true, data: returnData });
+                // Decode return value using function schema if available
+                const func = this.functions.get(pending.functionId);
+                if (func && func.returnTypeDef) {
+                    const view = new DataView(data.buffer, data.byteOffset);
+                    const [value, bytesRead] = this._decodeTypedValue(view, data, offset, func.returnTypeDef);
+                    pending.resolve({ success: true, value });
+                } else {
+                    // No schema available — return raw bytes for caller to decode
+                    pending.resolve({ success: true, data: data.slice(offset) });
+                }
             } else {
                 pending.resolve({ success: true });
             }
@@ -1351,6 +1374,11 @@ class MicroProtoClient {
             return false;
         }
 
+        if (!this.isConnected()) {
+            console.warn('Not connected, property update not sent:', prop.name);
+            return false;
+        }
+
         this._sendPropertyUpdate(prop.id, value, prop.typeId);
         return true;
     }
@@ -1469,7 +1497,7 @@ class MicroProtoClient {
                     reject({ success: false, message: 'RPC timeout' });
                 }, this._rpcTimeout);
 
-                this._pendingRpcCalls.set(callId, { resolve, reject, timeout });
+                this._pendingRpcCalls.set(callId, { resolve, reject, timeout, functionId: funcId });
             }
 
             this._log('Calling function:', nameOrId, 'callId=', callId);
@@ -1570,9 +1598,13 @@ class MicroProtoClient {
             if (headerData) flags |= 0x02;
             if (bodyData) flags |= 0x04;
 
+            // Encode header and body as blobs (varint length + data)
+            const headerLenBytes = headerData ? this._encodeVarint(headerData.length) : [];
+            const bodyLenBytes = bodyData ? this._encodeVarint(bodyData.length) : [];
+
             let messageSize = 1 + 1 + propIdBytes.length + resourceIdBytes.length;
-            if (headerData) messageSize += headerData.length;
-            if (bodyData) messageSize += bodyData.length;
+            if (headerData) messageSize += headerLenBytes.length + headerData.length;
+            if (bodyData) messageSize += bodyLenBytes.length + bodyData.length;
 
             const buf = new ArrayBuffer(messageSize);
             const bytes = new Uint8Array(buf);
@@ -1586,10 +1618,14 @@ class MicroProtoClient {
             offset += resourceIdBytes.length;
 
             if (headerData) {
+                bytes.set(headerLenBytes, offset);
+                offset += headerLenBytes.length;
                 bytes.set(headerData, offset);
                 offset += headerData.length;
             }
             if (bodyData) {
+                bytes.set(bodyLenBytes, offset);
+                offset += bodyLenBytes.length;
                 bytes.set(bodyData, offset);
             }
 

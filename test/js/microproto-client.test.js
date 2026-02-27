@@ -209,6 +209,7 @@ test('encodes UINT8 property update', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
 
     // Setup property
     client.properties.set(3, { id: 3, name: 'brightness', typeId: 0x03, readonly: false });
@@ -227,6 +228,7 @@ test('encodes BOOL property update', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
 
     client.properties.set(2, { id: 2, name: 'enabled', typeId: 0x01, readonly: false });
     client.propertyByName.set('enabled', 2);
@@ -248,6 +250,7 @@ test('encodes FLOAT32 property update', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
 
     client.properties.set(1, { id: 1, name: 'speed', typeId: 0x05, readonly: false });
     client.propertyByName.set('speed', 1);
@@ -268,6 +271,7 @@ test('encodes INT32 property update', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
 
     client.properties.set(5, { id: 5, name: 'count', typeId: 0x04, readonly: false });
     client.propertyByName.set('count', 5);
@@ -284,6 +288,7 @@ test('rejects readonly property update', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
 
     client.properties.set(10, { id: 10, name: 'readonly_prop', typeId: 0x03, readonly: true });
     client.propertyByName.set('readonly_prop', 10);
@@ -763,7 +768,9 @@ test('_sendPing sends correct message', () => {
     assertEqual(client.ws.sentMessages.length, 1, 'message sent');
     const sent = new Uint8Array(client.ws.sentMessages[0]);
     assertEqual(sent[0], 0x06, 'PING opcode');  // MVP: PING is 0x06
-    assertEqual(sent.length, 5, 'message length');
+    // Payload is varint-encoded (value 0 = 1 byte), so total = 1 (header) + 1 (varint) = 2
+    assertEqual(sent.length, 2, 'message length');
+    assertEqual(sent[1], 0x00, 'varint payload 0');
 });
 
 test('getLastPongAge returns correct value', () => {
@@ -1109,6 +1116,7 @@ test('sets brightness via setProperty', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
     setupLedProperties(client);
 
     const result = client.setProperty('brightness', 128);
@@ -1124,6 +1132,7 @@ test('sets shaderIndex to change animation', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
     setupLedProperties(client);
 
     client.setProperty('shaderIndex', 5);
@@ -1137,6 +1146,7 @@ test('sets ledCount to configure LED strip length', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
     setupLedProperties(client);
 
     client.setProperty('ledCount', 60);
@@ -1150,6 +1160,7 @@ test('toggles atmosphericFade effect', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
     setupLedProperties(client);
 
     client.setProperty('atmosphericFade', true);
@@ -1163,6 +1174,7 @@ test('rejects write to readonly ledPreview', () => {
     const client = new MicroProtoClient('ws://test:81', { reconnect: false });
     client.ws = new MockWebSocket('ws://test:81');
     client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
     setupLedProperties(client);
 
     const result = client.setProperty('ledPreview', [255, 0, 0]);
@@ -1321,3 +1333,4 @@ console.log('='.repeat(40));
 if (failCount > 0) {
     process.exit(1);
 }
+process.exit(0);

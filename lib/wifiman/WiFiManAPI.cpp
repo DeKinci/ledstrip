@@ -1,30 +1,33 @@
 #include "WiFiMan.h"
 #include "WiFiManWebUI.h"
+#include <Logger.h>
+
+static const char* TAG = "WiFiMan";
 
 namespace WiFiMan {
 
 void WiFiManager::setupRoutes() {
     if (!_dispatcher) {
-        Serial.println("[WiFiMan] No dispatcher provided, web interface disabled");
+        LOG_WARN(TAG, "No dispatcher provided, web interface disabled");
         return;
     }
 
-    Serial.println("[WiFiMan] Setting up WiFiMan web routes");
+    LOG_INFO(TAG, "Setting up WiFiMan web routes");
 
     // API: Scan networks
     _dispatcher->onGet("/wifiman/scan", [this](HttpRequest& req) -> HttpResponse {
-        Serial.println("[WiFiMan] Scan endpoint called");
+        LOG_DEBUG(TAG, "Scan endpoint called");
         JsonDocument doc;
         JsonArray networks = doc["networks"].to<JsonArray>();
 
         int n = WiFi.scanComplete();
-        Serial.printf("[WiFiMan] scanComplete() returned: %d\n", n);
+        LOG_DEBUG(TAG, "scanComplete() returned: %d", n);
 
         if (n == WIFI_SCAN_RUNNING) {
             doc["status"] = "scanning";
-            Serial.println("[WiFiMan] Scan already running");
+            LOG_DEBUG(TAG, "Scan already running");
         } else if (n >= 0) {
-            Serial.printf("[WiFiMan] Found %d networks\n", n);
+            LOG_DEBUG(TAG, "Found %d networks", n);
             for (int i = 0; i < n; i++) {
                 JsonObject net = networks.add<JsonObject>();
                 net["ssid"] = WiFi.SSID(i);
@@ -35,7 +38,7 @@ void WiFiManager::setupRoutes() {
             WiFi.scanNetworks(true);  // Start new async scan
         } else {
             // Start initial scan
-            Serial.println("[WiFiMan] Starting new scan");
+            LOG_DEBUG(TAG, "Starting new scan");
             WiFi.scanNetworks(true);
             doc["status"] = "scanning";
         }
@@ -45,12 +48,12 @@ void WiFiManager::setupRoutes() {
 
     // API: List saved networks
     _dispatcher->onGet("/wifiman/list", [this](HttpRequest& req) -> HttpResponse {
-        Serial.println("[WiFiMan] List endpoint called");
+        LOG_DEBUG(TAG, "List endpoint called");
         JsonDocument doc;
         JsonArray networks = doc["networks"].to<JsonArray>();
 
         auto allCreds = creds.getAll();
-        Serial.printf("[WiFiMan] Found %d saved networks\n", allCreds.size());
+        LOG_DEBUG(TAG, "Found %d saved networks", allCreds.size());
 
         for (const auto& cred : allCreds) {
             JsonObject net = networks.add<JsonObject>();
@@ -95,7 +98,7 @@ void WiFiManager::setupRoutes() {
         int priority = doc["priority"] | 0;
 
         if (creds.addNetwork(ssid, password, priority)) {
-            Serial.printf("[WiFiMan] Network added via web: %s\n", ssid.c_str());
+            LOG_INFO(TAG, "Network added via web: %s", ssid.c_str());
             return HttpResponse::json("{\"success\":true}");
         } else {
             return HttpResponse::json("{\"error\":\"Failed to add network\"}", 500);
@@ -116,7 +119,7 @@ void WiFiManager::setupRoutes() {
         String ssid = doc["ssid"].as<String>();
 
         if (creds.removeNetwork(ssid)) {
-            Serial.printf("[WiFiMan] Network removed via web: %s\n", ssid.c_str());
+            LOG_INFO(TAG, "Network removed via web: %s", ssid.c_str());
             return HttpResponse::json("{\"success\":true}");
         } else {
             return HttpResponse::json("{\"error\":\"Network not found\"}", 404);
@@ -126,13 +129,13 @@ void WiFiManager::setupRoutes() {
     // API: Clear all networks
     _dispatcher->onPost("/wifiman/clear", [this](HttpRequest& req) -> HttpResponse {
         creds.clearAll();
-        Serial.println("[WiFiMan] All networks cleared via web");
+        LOG_INFO(TAG, "All networks cleared via web");
         return HttpResponse::json("{\"success\":true}");
     });
 
     // API: Connect now
     _dispatcher->onPost("/wifiman/connect", [this](HttpRequest& req) -> HttpResponse {
-        Serial.println("[WiFiMan] Connection requested via web");
+        LOG_INFO(TAG, "Connection requested via web");
         // Set flag to trigger connection in loop (after response is sent)
         webConnectRequestTime = millis();
         return HttpResponse::json("{\"success\":true}");
@@ -143,13 +146,13 @@ void WiFiManager::setupRoutes() {
         return HttpResponse::html((const uint8_t*)WIFIMAN_PORTAL_HTML, strlen(WIFIMAN_PORTAL_HTML));
     });
 
-    Serial.println("[WiFiMan] Web routes ready at /wifiman");
+    LOG_INFO(TAG, "Web routes ready at /wifiman");
 }
 
 void WiFiManager::setupCaptivePortal() {
     if (!_dispatcher) return;
 
-    Serial.println("[WiFiMan] Setting up captive portal routes");
+    LOG_INFO(TAG, "Setting up captive portal routes");
 
     // High-priority route for / that serves portal in AP mode
     // Priority 100 ensures this takes precedence over normal "/" route
@@ -181,13 +184,13 @@ void WiFiManager::setupCaptivePortal() {
     _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/canonical.html", redirect, 100);
     _captiveDetectHandles[_captiveDetectCount++] = _dispatcher->onGet("/success.txt", redirect, 100);
 
-    Serial.printf("[WiFiMan] Captive portal ready with %d detection endpoints\n", _captiveDetectCount + 1);
+    LOG_INFO(TAG, "Captive portal ready with %d detection endpoints", _captiveDetectCount + 1);
 }
 
 void WiFiManager::teardownCaptivePortal() {
     if (!_dispatcher) return;
 
-    Serial.println("[WiFiMan] Removing captive portal routes");
+    LOG_INFO(TAG, "Removing captive portal routes");
 
     // Remove root captive portal
     if (_captiveRootHandle.valid()) {
@@ -204,7 +207,7 @@ void WiFiManager::teardownCaptivePortal() {
     }
     _captiveDetectCount = 0;
 
-    Serial.println("[WiFiMan] Captive portal removed, /wifiman still available");
+    LOG_INFO(TAG, "Captive portal removed, /wifiman still available");
 }
 
 } // namespace WiFiMan

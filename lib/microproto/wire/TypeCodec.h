@@ -8,6 +8,15 @@
 #include "../Reflect.h"
 #include "../Field.h"
 
+// Configurable decode buffer sizes - override in platformio.ini build_flags
+#ifndef MICROPROTO_DECODE_BUFFER_SIZE
+#define MICROPROTO_DECODE_BUFFER_SIZE 256
+#endif
+
+#ifndef MICROPROTO_DECODE_LIST_BUFFER_SIZE
+#define MICROPROTO_DECODE_LIST_BUFFER_SIZE 512
+#endif
+
 namespace MicroProto {
 
 // Forward declarations for container properties
@@ -235,6 +244,20 @@ public:
      * @return true if successful
      */
     static bool decodeProperty(ReadBuffer& buf, PropertyBase* prop);
+
+    /**
+     * Decode a property value into a separate buffer (does not mutate the property).
+     * Used by MessageRouter to avoid writing into readonly properties before access checks.
+     *
+     * @param buf ReadBuffer to read from
+     * @param prop Property (used only for type info, not mutated)
+     * @param outBuf Output buffer for decoded value
+     * @param outBufSize Size of output buffer
+     * @param decodedSize Output: actual decoded size in bytes
+     * @return true if successful
+     */
+    static bool decodeInto(ReadBuffer& buf, const PropertyBase* prop,
+                           uint8_t* outBuf, size_t outBufSize, size_t& decodedSize);
 
     /**
      * Get the wire size of a type

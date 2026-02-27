@@ -168,9 +168,9 @@ public:
  */
 namespace ResourceError {
     constexpr uint8_t NOT_FOUND = 1;
-    constexpr uint8_t OUT_OF_SPACE = 1;  // PUT only
     constexpr uint8_t INVALID_DATA = 2;
     constexpr uint8_t ERROR = 3;
+    constexpr uint8_t OUT_OF_SPACE = 4;  // PUT only
 }
 
 } // namespace MicroProto

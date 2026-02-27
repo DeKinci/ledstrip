@@ -4,7 +4,6 @@
 #include <Arduino.h>
 #include "Animation.h"
 #include <math.h>
-#include "ShaderStorage.h"
 
 class Rainbow : public Animation
 {

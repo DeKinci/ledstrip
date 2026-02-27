@@ -3,8 +3,10 @@
 
 namespace MicroProto {
 
-bool MessageRouter::process(const uint8_t* data, size_t length) {
+bool MessageRouter::process(uint8_t clientId, const uint8_t* data, size_t length) {
     if (length == 0) return false;
+
+    _clientId = clientId;
 
     ReadBuffer buf(data, length);
 
@@ -52,7 +54,7 @@ bool MessageRouter::processHello(ReadBuffer& buf, uint8_t flags) {
     if (!Hello::decodePayload(buf, (flags & Flags::IS_RESPONSE) != 0, hello)) {
         return false;
     }
-    _handler->onHello(hello);
+    _handler->onHello(_clientId, hello);
     return true;
 }
 
@@ -91,14 +93,18 @@ bool MessageRouter::processPropertyUpdate(ReadBuffer& buf, uint8_t flags) {
             return false;
         }
 
-        // Decode directly into property (handles basic + container types)
-        if (!TypeCodec::decodeProperty(buf, prop)) {
+        // Decode into temporary buffer to avoid mutating readonly properties.
+        // The handler is responsible for applying the value after access checks.
+        uint8_t tempBuf[MICROPROTO_DECODE_BUFFER_SIZE];
+        size_t decodedSize = 0;
+
+        if (!TypeCodec::decodeInto(buf, prop, tempBuf, sizeof(tempBuf), decodedSize)) {
             Serial.printf("[MicroProto] Failed to decode value for property %d\n", propId);
             return false;
         }
 
-        // Notify handler
-        _handler->onPropertyUpdate(propId, prop->getData(), prop->getSize());
+        // Notify handler with decoded value — handler checks readonly before applying
+        _handler->onPropertyUpdate(_clientId, propId, tempBuf, decodedSize);
     }
 
     return buf.ok();
@@ -109,7 +115,7 @@ bool MessageRouter::processError(ReadBuffer& buf, uint8_t flags) {
     if (!ErrorMessage::decodePayload(buf, flags, error)) {
         return false;
     }
-    _handler->onError(error);
+    _handler->onError(_clientId, error);
     return true;
 }
 
@@ -122,7 +128,7 @@ bool MessageRouter::processPing(ReadBuffer& buf, uint8_t flags) {
         payload = 0;  // Empty ping is ok
     }
 
-    _handler->onPing(isResponse, payload);
+    _handler->onPing(_clientId, isResponse, payload);
     return true;
 }
 
@@ -140,13 +146,13 @@ bool MessageRouter::processRpc(ReadBuffer& buf, uint8_t flags) {
 
         if (rpcFlags.success) {
             // Success response
-            _handler->onRpcResponse(callId, true, buf);
+            _handler->onRpcResponse(_clientId, callId, true, buf);
         } else {
             // Error response
             uint8_t errorCode = buf.readByte();
             size_t msgLen;
             const char* errorMsg = buf.readUtf8(msgLen);
-            _handler->onRpcError(callId, errorCode, errorMsg, msgLen);
+            _handler->onRpcError(_clientId, callId, errorCode, errorMsg, msgLen);
         }
     } else {
         // RPC Request
@@ -156,7 +162,7 @@ bool MessageRouter::processRpc(ReadBuffer& buf, uint8_t flags) {
             if (!buf.ok()) return false;
         }
 
-        _handler->onRpcRequest(functionId, callId, rpcFlags.needsResponse, buf);
+        _handler->onRpcRequest(_clientId, functionId, callId, rpcFlags.needsResponse, buf);
     }
 
     return true;
@@ -175,10 +181,10 @@ bool MessageRouter::processResourceGet(ReadBuffer& buf, uint8_t flags) {
             // OK response: data follows as blob
             size_t dataLen;
             const uint8_t* data = buf.readBlob(dataLen);
-            _handler->onResourceGetResponse(requestId, true, data, dataLen);
+            _handler->onResourceGetResponse(_clientId, requestId, true, data, dataLen);
         } else {
             // Error response (no data)
-            _handler->onResourceGetResponse(requestId, false, nullptr, 0);
+            _handler->onResourceGetResponse(_clientId, requestId, false, nullptr, 0);
         }
     } else {
         // Request
@@ -188,7 +194,7 @@ bool MessageRouter::processResourceGet(ReadBuffer& buf, uint8_t flags) {
         uint32_t resourceId = buf.readVarint();
         if (!buf.ok()) return false;
 
-        _handler->onResourceGetRequest(requestId, propertyId, resourceId);
+        _handler->onResourceGetRequest(_clientId, requestId, propertyId, resourceId);
     }
 
     return true;
@@ -206,10 +212,10 @@ bool MessageRouter::processResourcePut(ReadBuffer& buf, uint8_t flags) {
             // OK: resourceId follows
             uint32_t resourceId = buf.readVarint();
             if (!buf.ok()) return false;
-            _handler->onResourcePutResponse(requestId, true, resourceId);
+            _handler->onResourcePutResponse(_clientId, requestId, true, resourceId);
         } else {
             // Error
-            _handler->onResourcePutResponse(requestId, false, 0);
+            _handler->onResourcePutResponse(_clientId, requestId, false, 0);
         }
     } else {
         // Request
@@ -234,7 +240,7 @@ bool MessageRouter::processResourcePut(ReadBuffer& buf, uint8_t flags) {
             if (!buf.ok()) return false;
         }
 
-        _handler->onResourcePutRequest(requestId, propertyId, resourceId,
+        _handler->onResourcePutRequest(_clientId, requestId, propertyId, resourceId,
                                         headerData, headerLen, bodyData, bodyLen);
     }
 
@@ -250,7 +256,7 @@ bool MessageRouter::processResourceDelete(ReadBuffer& buf, uint8_t flags) {
     if (isResponse) {
         // Response
         bool statusError = flags & Flags::STATUS_ERROR;
-        _handler->onResourceDeleteResponse(requestId, !statusError);
+        _handler->onResourceDeleteResponse(_clientId, requestId, !statusError);
     } else {
         // Request
         uint16_t propertyId = buf.readPropId();
@@ -259,7 +265,7 @@ bool MessageRouter::processResourceDelete(ReadBuffer& buf, uint8_t flags) {
         uint32_t resourceId = buf.readVarint();
         if (!buf.ok()) return false;
 
-        _handler->onResourceDeleteRequest(requestId, propertyId, resourceId);
+        _handler->onResourceDeleteRequest(_clientId, requestId, propertyId, resourceId);
     }
 
     return true;

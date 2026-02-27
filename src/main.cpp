@@ -6,12 +6,13 @@
 #include <WiFiMan.h>
 #include <PropertySystem.h>
 #include <transport/MicroProtoServer.h>
+#include <transport/MicroProtoBleServer.h>
 
 #include "animations/Anime.h"
-#include "core/ShaderStorage.h"
 #include "web/LedApiController.h"
 #include "input/EncoderInput.hpp"
 #include "ble/BleDeviceManager.hpp"
+#include <Logger.h>
 
 #include "rsc/w_index_htm.h"
 #include "rsc/w_proto_htm.h"
@@ -20,6 +21,7 @@
 
 HttpServer http(80);
 MicroProto::MicroProtoServer protoServer(81);
+MicroProto::MicroProtoBleServer protoBle;
 WiFiMan::WiFiManager wifiManager(&httpDispatcher);
 
 CallResult<void*> animeStatus(nullptr);
@@ -32,6 +34,7 @@ void setup() {
 
     // Initialize BLE FIRST (before WiFi) - they share the radio
     BleDeviceManager::init();
+    protoBle.begin();
     Serial.printf("2. After BLE init: Free heap: %lu bytes\n", ESP.getFreeHeap());
 
     // Initialize property system (includes loading persistent values)
@@ -42,10 +45,6 @@ void setup() {
     // Initialize encoder input
     EncoderInput::init();
     Serial.printf("3. After EncoderInput: Free heap: %lu bytes\n", ESP.getFreeHeap());
-
-    // Initialize shader storage
-    ShaderStorage::init();
-    Serial.printf("4. After ShaderStorage: Free heap: %lu bytes\n", ESP.getFreeHeap());
 
     // Initialize Anime (LED animation system)
     animeStatus = Anime::connect();
@@ -135,8 +134,9 @@ void loop() {
     EncoderInput::loop();
     yield();
 
-    // BLE device management
+    // BLE device management + MicroProto BLE
     BleDeviceManager::loop();
+    protoBle.loop();
     yield();
 
     // LED animation
@@ -147,10 +147,11 @@ void loop() {
     static uint32_t lastStatusPrint = 0;
     if (millis() - lastStatusPrint > 10000) {
         lastStatusPrint = millis();
-        Serial.printf("Free heap: %lu, RSSI: %d dBm, Proto clients: %u, WiFi: %s, Shaders: %u\n",
-                      ESP.getFreeHeap(), WiFi.RSSI(),
-                      protoServer.connectedClients(),
-                      wifiManager.getStateString().c_str(),
-                      Anime::getShaderCount());
+        LOG_INFO("Main", "Free heap: %lu, RSSI: %d dBm, WS: %u, BLE: %u, WiFi: %s, Shaders: %u",
+                 ESP.getFreeHeap(), WiFi.RSSI(),
+                 protoServer.connectedClients(),
+                 protoBle.connectedClients(),
+                 wifiManager.getStateString().c_str(),
+                 Anime::getShaderCount());
     }
 }
