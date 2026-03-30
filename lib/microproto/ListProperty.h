@@ -178,9 +178,9 @@ public:
     // Get pointer to data
     const T* data() const { return _storage.data(); }
 
-    // Set single element
+    // Set single element (internal — not blocked by readonly)
     void set(size_t index, const T& value) {
-        if (readonly || index >= _count) return;
+        if (index >= _count) return;
         if (_storage[index] == value) return;  // No change
         _storage[index] = value;
         notifyChange();
@@ -188,7 +188,7 @@ public:
 
     // Add element to end
     bool push(const T& value) {
-        if (readonly || _count >= MaxN) return false;
+        if (_count >= MaxN) return false;
         _storage[_count++] = value;
         notifyChange();
         return true;
@@ -196,7 +196,7 @@ public:
 
     // Remove last element
     bool pop() {
-        if (readonly || _count == 0) return false;
+        if (_count == 0) return false;
         _count--;
         notifyChange();
         return true;
@@ -204,7 +204,6 @@ public:
 
     // Clear all elements
     void clear() {
-        if (readonly) return;
         if (_count == 0) return;  // No change
         _count = 0;
         notifyChange();
@@ -212,7 +211,6 @@ public:
 
     // Resize (truncate or extend with default values)
     void resize(size_t newCount) {
-        if (readonly) return;
         if (newCount > MaxN) newCount = MaxN;
         if (newCount == _count) return;  // No change
         // Fill new elements with default value
@@ -226,7 +224,6 @@ public:
     // Set from array
     template<size_t N>
     void setFrom(const std::array<T, N>& arr) {
-        if (readonly) return;
         size_t newCount = (N < MaxN) ? N : MaxN;
 
         // Check if anything is different
@@ -250,7 +247,6 @@ public:
 
     // Set from pointer + count
     void setFrom(const T* data, size_t count) {
-        if (readonly) return;
         size_t newCount = (count < MaxN) ? count : MaxN;
 
         // Check if anything is different
@@ -276,7 +272,7 @@ public:
     template<typename U = T>
     typename std::enable_if<std::is_same<U, uint8_t>::value, void>::type
     setString(const char* str) {
-        if (readonly) return;
+        // readonly only enforced in setData (client writes), not internal methods
 
         // Calculate new length
         size_t newCount = 0;
@@ -411,29 +407,29 @@ public:
             }
         }
 
-        // Validate unique constraint
-        if (_containerConstraints.hasUnique) {
-            const T* elements = static_cast<const T*>(data);
-            for (size_t i = 0; i < newCount; ++i) {
-                for (size_t j = i + 1; j < newCount; ++j) {
-                    if (elements[i] == elements[j]) return false;
+        // Ordering/uniqueness constraints only apply to comparable types
+        if constexpr (std::is_arithmetic_v<T>) {
+            if (_containerConstraints.hasUnique) {
+                const T* elements = static_cast<const T*>(data);
+                for (size_t i = 0; i < newCount; ++i) {
+                    for (size_t j = i + 1; j < newCount; ++j) {
+                        if (elements[i] == elements[j]) return false;
+                    }
                 }
             }
-        }
 
-        // Validate sorted constraint
-        if (_containerConstraints.isSorted && newCount > 1) {
-            const T* elements = static_cast<const T*>(data);
-            for (size_t i = 0; i < newCount - 1; ++i) {
-                if (elements[i] > elements[i + 1]) return false;
+            if (_containerConstraints.isSorted && newCount > 1) {
+                const T* elements = static_cast<const T*>(data);
+                for (size_t i = 0; i < newCount - 1; ++i) {
+                    if (elements[i] > elements[i + 1]) return false;
+                }
             }
-        }
 
-        // Validate reverse sorted constraint
-        if (_containerConstraints.isReverseSorted && newCount > 1) {
-            const T* elements = static_cast<const T*>(data);
-            for (size_t i = 0; i < newCount - 1; ++i) {
-                if (elements[i] < elements[i + 1]) return false;
+            if (_containerConstraints.isReverseSorted && newCount > 1) {
+                const T* elements = static_cast<const T*>(data);
+                for (size_t i = 0; i < newCount - 1; ++i) {
+                    if (elements[i] < elements[i + 1]) return false;
+                }
             }
         }
 

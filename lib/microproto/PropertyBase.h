@@ -52,40 +52,53 @@ namespace Widget {
         CHECKBOX = 2
     };
 
-    // For INT8, UINT8, INT32 types
+    // For INT8, UINT8, INT16, UINT16, INT32 types
     enum class Number : uint8_t {
         AUTO = 0,
         SLIDER = 1,
-        SPINBOX = 2     // Number input box
+        SPINBOX = 2
     };
 
     // For FLOAT32 type
     enum class Decimal : uint8_t {
         AUTO = 0,
         SLIDER = 1,
-        SPINBOX = 2     // Decimal input box
+        SPINBOX = 2
     };
 
     // For ARRAY<uint8_t, 3> or <uint8_t, 4> (RGB/RGBA)
     enum class Color : uint8_t {
         AUTO = 0,
-        PICKER = 1,     // Color picker widget
-        SLIDERS = 2,    // Individual R/G/B sliders
-        HEX_CODE = 3    // Hex input #RRGGBB
+        PICKER = 1,
+        SLIDERS = 2,
+        HEX_CODE = 3
     };
 
-    // For LIST<uint8_t> (strings/text)
+    // For LIST<uint8_t> (strings)
     enum class Text : uint8_t {
         AUTO = 0,
-        LINE = 1,       // Single-line text input
-        TEXTAREA = 2    // Multi-line text
+        LINE = 1,
+        TEXTAREA = 2,
+        ERROR_DISPLAY = 3   // Read-only error bar
     };
 
-    // For ARRAY/LIST (generic)
-    enum class Array : uint8_t {
+    // For RESOURCE type
+    enum class Resource : uint8_t {
         AUTO = 0,
-        INLINE = 1,     // Inline editor [a, b, c]
-        LIST = 2        // Vertical list editor
+        RESOURCE_LIST = 1,  // CRUD list with inline editing
+        CODE_EDITOR = 2     // Code editor with syntax highlighting
+    };
+
+    // For LIST<uint8_t> with LED data
+    enum class LedData : uint8_t {
+        AUTO = 0,
+        LED_CANVAS = 1      // LED preview canvas
+    };
+
+    // For LIST<OBJECT> (segments etc.)
+    enum class ObjectList : uint8_t {
+        AUTO = 0,
+        SEGMENT_EDITOR = 1  // Interactive segment layout editor
     };
 }
 
@@ -123,7 +136,9 @@ struct UIHints {
     UIHints& setWidget(Widget::Decimal w) { widget = static_cast<uint8_t>(w); return *this; }
     UIHints& setWidget(Widget::Color w) { widget = static_cast<uint8_t>(w); return *this; }
     UIHints& setWidget(Widget::Text w) { widget = static_cast<uint8_t>(w); return *this; }
-    UIHints& setWidget(Widget::Array w) { widget = static_cast<uint8_t>(w); return *this; }
+    UIHints& setWidget(Widget::Resource w) { widget = static_cast<uint8_t>(w); return *this; }
+    UIHints& setWidget(Widget::LedData w) { widget = static_cast<uint8_t>(w); return *this; }
+    UIHints& setWidget(Widget::ObjectList w) { widget = static_cast<uint8_t>(w); return *this; }
     UIHints& setWidget(uint8_t w) { widget = w; return *this; }
 
     bool hasUnit() const { return unit != nullptr && unit[0] != '\0'; }
@@ -305,9 +320,11 @@ struct ValueConstraints {
 
     template<typename T>
     bool validate(T value) const {
-        if (flags.hasMin && value < getMin<T>()) return false;
-        if (flags.hasMax && value > getMax<T>()) return false;
-        if (flags.hasOneOf && !isInOneOf(value)) return false;
+        if constexpr (std::is_arithmetic_v<T>) {
+            if (flags.hasMin && value < getMin<T>()) return false;
+            if (flags.hasMax && value > getMax<T>()) return false;
+            if (flags.hasOneOf && !isInOneOf(value)) return false;
+        }
         return true;
     }
 };
@@ -460,6 +477,7 @@ public:
     static constexpr size_t MAX_PROPERTIES = 256;
     static std::array<PropertyBase*, MAX_PROPERTIES> byId;
     static uint8_t count;  // Number of registered properties
+    static uint16_t schemaVersion;  // Persisted to NVS, bumped on schema change
 
     // Fast lookup - returns nullptr if ID not found
     static PropertyBase* find(uint8_t id) {
@@ -477,6 +495,14 @@ public:
         const char* description = nullptr,
         UIHints uiHints = UIHints()
     );
+
+    // Named constants for readable flag arguments
+    static constexpr bool PERSISTENT = true;
+    static constexpr bool READONLY = true;
+    static constexpr bool HIDDEN = true;
+    static constexpr bool NOT_PERSISTENT = false;
+    static constexpr bool NOT_READONLY = false;
+    static constexpr bool NOT_HIDDEN = false;
 
     virtual ~PropertyBase() = default;
 

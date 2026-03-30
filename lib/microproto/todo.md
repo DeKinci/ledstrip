@@ -6,7 +6,6 @@
 
 ## Schema
 - Pattern (regex) validation for strings
-- Schema versioning and caching (send hash if client has it)
 
 ## Distributed/Mesh
 - GROUP/GLOBAL property levels with versioning

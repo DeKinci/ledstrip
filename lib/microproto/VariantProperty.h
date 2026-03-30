@@ -431,6 +431,83 @@ private:
 #define VARIANT_TYPE_C(name, type, size, constraints) \
     VariantTypeDef(name, type, size, constraints)
 
+// ============================================================================
+// MicroVariant<MaxDataSize> — nestable variant value type
+//
+// A lightweight tagged union for use as struct fields or container elements.
+// Fixed size in memory: 1 (typeIndex) + MaxDataSize bytes.
+// Wire format: raw bytes (same as OBJECT — full fixed size, padded).
+//
+// Usage:
+//   struct MyStruct {
+//       MicroVariant<4> result;   // can hold uint8, int32, float
+//   };
+//
+//   // Register variant type definitions for schema encoding:
+//   MICROPROTO_VARIANT_TYPES(MyStruct::result, 3,
+//       VariantTypeDef("value", TYPE_UINT8, 1),
+//       VariantTypeDef("error", TYPE_INT32, 4),
+//       VariantTypeDef("ratio", TYPE_FLOAT32, 4)
+//   );
+// ============================================================================
+
+template<size_t MaxDataSize>
+struct MicroVariant {
+    uint8_t typeIndex;
+    std::array<uint8_t, MaxDataSize> data;
+
+    MicroVariant() : typeIndex(0), data{} {}
+
+    bool operator==(const MicroVariant& other) const {
+        return typeIndex == other.typeIndex && data == other.data;
+    }
+    bool operator!=(const MicroVariant& other) const { return !(*this == other); }
+
+    template<typename T>
+    void set(uint8_t type, const T& value) {
+        static_assert(sizeof(T) <= MaxDataSize, "Value too large for MicroVariant");
+        typeIndex = type;
+        data.fill(0);
+        memcpy(data.data(), &value, sizeof(T));
+    }
+
+    template<typename T>
+    T get() const {
+        static_assert(sizeof(T) <= MaxDataSize, "Value too large for MicroVariant");
+        T result;
+        memcpy(&result, data.data(), sizeof(T));
+        return result;
+    }
+};
+
 } // namespace MicroProto
+
+// TypeTraits for MicroVariant — TYPE_VARIANT with fixed wire size
+template<size_t MaxDataSize>
+struct MicroProto::TypeTraits<MicroProto::MicroVariant<MaxDataSize>, void> {
+    static constexpr uint8_t type_id = MicroProto::TYPE_VARIANT;
+    static constexpr size_t size = 1 + MaxDataSize;
+};
+
+/**
+ * Macro to register variant type definitions for a MicroVariant used as a struct field.
+ * Used by SchemaTypeEncoder to emit proper VARIANT schema for nested variants.
+ *
+ * Usage:
+ *   MICROPROTO_VARIANT_TYPES(MicroVariant<4>, 2,
+ *       MicroProto::VariantTypeDef("value", MicroProto::TYPE_UINT8, 1),
+ *       MicroProto::VariantTypeDef("error", MicroProto::TYPE_INT32, 4)
+ *   );
+ */
+#define MICROPROTO_VARIANT_TYPES(Type, Count, ...) \
+    template<> \
+    struct MicroProto::reflect::variant_types<Type> { \
+        static constexpr bool registered = true; \
+        static constexpr size_t count = Count; \
+        static const MicroProto::VariantTypeDef types[Count]; \
+    }; \
+    const MicroProto::VariantTypeDef MicroProto::reflect::variant_types<Type>::types[Count] = { __VA_ARGS__ }
+
+// variant_types trait is forward-declared in Reflect.h
 
 #endif // MICROPROTO_VARIANT_PROPERTY_H

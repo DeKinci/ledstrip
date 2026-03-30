@@ -82,7 +82,6 @@ public:
 
     // Assignment operator
     Property& operator=(const T& newValue) {
-        if (readonly) return *this;
         if (_value == newValue) return *this;  // No change
 
         // Validate against constraints (min/max/oneof)
@@ -104,7 +103,6 @@ public:
 
     // Try to set value, returns true if accepted (passes validation)
     bool trySet(const T& newValue) {
-        if (readonly) return false;
         if (_constraints.flags.any() && !_constraints.validate(newValue)) {
             return false;
         }
@@ -133,6 +131,7 @@ public:
     }
 
     void setData(const void* data, size_t size) override {
+        if (readonly) return;
         if (size == sizeof(T)) {
             *this = *static_cast<const T*>(data);
         }

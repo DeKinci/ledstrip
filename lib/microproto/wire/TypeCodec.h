@@ -57,6 +57,14 @@ public:
                 if (size != 1) return false;
                 return buf.writeUint8(*static_cast<const uint8_t*>(data));
 
+            case TYPE_INT16:
+                if (size != 2) return false;
+                return buf.writeBytes(static_cast<const uint8_t*>(data), 2);
+
+            case TYPE_UINT16:
+                if (size != 2) return false;
+                return buf.writeBytes(static_cast<const uint8_t*>(data), 2);
+
             case TYPE_INT32:
                 if (size != 4) return false;
                 return buf.writeInt32(*static_cast<const int32_t*>(data));
@@ -64,6 +72,11 @@ public:
             case TYPE_FLOAT32:
                 if (size != 4) return false;
                 return buf.writeFloat32(*static_cast<const float*>(data));
+
+            case TYPE_OBJECT:
+            case TYPE_VARIANT:
+                // Struct/Variant: raw byte copy (fixed size in containers)
+                return buf.writeBytes(static_cast<const uint8_t*>(data), size);
 
             default:
                 return false;  // Unknown type
@@ -155,6 +168,14 @@ public:
                 *static_cast<uint8_t*>(data) = buf.readUint8();
                 return buf.ok();
 
+            case TYPE_INT16:
+                if (size != 2) return false;
+                return buf.readBytes(static_cast<uint8_t*>(data), 2);
+
+            case TYPE_UINT16:
+                if (size != 2) return false;
+                return buf.readBytes(static_cast<uint8_t*>(data), 2);
+
             case TYPE_INT32:
                 if (size != 4) return false;
                 *static_cast<int32_t*>(data) = buf.readInt32();
@@ -164,6 +185,11 @@ public:
                 if (size != 4) return false;
                 *static_cast<float*>(data) = buf.readFloat32();
                 return buf.ok();
+
+            case TYPE_OBJECT:
+            case TYPE_VARIANT:
+                // Struct/Variant: raw byte copy
+                return buf.readBytes(static_cast<uint8_t*>(data), size);
 
             default:
                 return false;  // Unknown type
@@ -270,6 +296,8 @@ public:
             case TYPE_BOOL:   return 1;
             case TYPE_INT8:   return 1;
             case TYPE_UINT8:  return 1;
+            case TYPE_INT16:  return 2;
+            case TYPE_UINT16: return 2;
             case TYPE_INT32:  return 4;
             case TYPE_FLOAT32: return 4;
             default: return 0;
@@ -291,6 +319,8 @@ public:
             case TYPE_BOOL:     return "BOOL";
             case TYPE_INT8:     return "INT8";
             case TYPE_UINT8:    return "UINT8";
+            case TYPE_INT16:    return "INT16";
+            case TYPE_UINT16:   return "UINT16";
             case TYPE_INT32:    return "INT32";
             case TYPE_FLOAT32:  return "FLOAT32";
             case TYPE_ARRAY:    return "ARRAY";
@@ -564,6 +594,29 @@ public:
     static std::enable_if_t<is_microproto_struct_v<T>, bool>
     encodeElement(WriteBuffer& buf, const ValueConstraints*) {
         return encode<T>(buf, nullptr);
+    }
+
+    // Element is MicroVariant — encode as VARIANT with registered type defs
+    template<typename T>
+    static std::enable_if_t<is_micro_variant_v<T>, bool>
+    encodeElement(WriteBuffer& buf, const ValueConstraints*) {
+        if (!buf.writeByte(TYPE_VARIANT)) return false;
+        if constexpr (reflect::variant_types<T>::registered) {
+            constexpr size_t count = reflect::variant_types<T>::count;
+            if (buf.writeVarint(static_cast<uint32_t>(count)) == 0) return false;
+            for (size_t i = 0; i < count; ++i) {
+                const auto& td = reflect::variant_types<T>::types[i];
+                if (!buf.writeUtf8(td.name)) return false;
+                if (!buf.writeByte(td.typeId)) return false;
+                if (isBasicType(td.typeId)) {
+                    if (!buf.writeByte(0)) return false;  // no constraints
+                }
+            }
+        } else {
+            // No type definitions registered — encode as opaque (0 types)
+            if (buf.writeVarint(0) == 0) return false;
+        }
+        return true;
     }
 
     // Element is std::string

@@ -6,7 +6,6 @@
     <title>LED Strip</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #0a0a0a;
@@ -14,312 +13,79 @@
             min-height: 100vh;
             padding: 16px;
         }
-
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
+        .container { max-width: 1200px; margin: 0 auto; }
+        .header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px; padding: 0 4px;
         }
-
-        /* Connection status */
-        .status {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            background: #1a1a1a;
-            border-radius: 20px;
-            font-size: 12px;
-            margin-bottom: 16px;
-        }
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #ef4444;
-        }
+        .status { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #888; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; }
         .status-dot.connected { background: #22c55e; }
 
-        /* LED Preview */
-        .led-preview {
-            background: #111;
-            border-radius: 16px;
-            padding: 16px;
-            margin-bottom: 16px;
+        /* Toast */
+        .toast-container {
+            position: fixed; top: 16px; right: 16px; z-index: 1000;
+            display: flex; flex-direction: column; gap: 8px; pointer-events: none;
         }
-        .led-strip {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 2px;
-            justify-content: center;
-            min-height: 24px;
+        .toast {
+            padding: 10px 16px; border-radius: 8px; font-size: 13px; color: white;
+            pointer-events: auto; max-width: 320px; word-break: break-word;
+            animation: toastIn 0.2s ease-out, toastOut 0.3s ease-in 3.7s forwards;
         }
-        .led {
-            border-radius: 50%;
-            box-shadow: 0 0 6px currentColor;
-            transition: background-color 0.05s;
-        }
+        .toast-error { background: #dc2626; }
+        .toast-info { background: #2563eb; }
+        @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; } }
+        @keyframes toastOut { from { opacity: 1; } to { opacity: 0; } }
 
-        /* Property Controls */
-        .controls {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-bottom: 24px;
-        }
-        .control {
-            background: #1a1a1a;
-            border-radius: 12px;
-            padding: 16px;
-            border-left: 3px solid #666;
-        }
-        .control-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .control-icon { font-size: 18px; }
-        .control-name { font-weight: 600; }
-        .control-value {
-            margin-left: auto;
-            font-size: 14px;
-            opacity: 0.7;
-            min-width: 40px;
-            text-align: right;
-        }
+        /* Button styles used by widgets */
+        .mp-btn { padding: 8px 16px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; transition: opacity 0.15s; }
+        .mp-btn:hover { opacity: 0.85; }
+        .mp-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .mp-btn-sm { padding: 4px 10px; font-size: 12px; }
+        .mp-btn-primary { background: #3b82f6; color: white; }
+        .mp-btn-warning { background: #f59e0b; color: white; }
+        .mp-btn-danger { background: #ef4444; color: white; }
+        .mp-btn-ghost { background: transparent; color: #888; }
+        .mp-btn-teal { background: #14b8a6; color: white; }
 
+        /* Range slider */
         input[type="range"] {
-            width: 100%;
-            height: 8px;
-            border-radius: 4px;
-            background: #333;
-            outline: none;
-            -webkit-appearance: none;
+            width: 100%; height: 8px; border-radius: 4px; background: #333;
+            outline: none; -webkit-appearance: none;
         }
         input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #fff;
-            cursor: pointer;
+            -webkit-appearance: none; width: 20px; height: 20px;
+            border-radius: 50%; background: #fff; cursor: pointer;
         }
-
-        /* Toggle switch */
-        .toggle-wrapper {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .toggle {
-            position: relative;
-            width: 48px;
-            height: 26px;
-        }
-        .toggle input {
-            opacity: 0;
-            width: 0;
-            height: 0;
-        }
-        .toggle-slider {
-            position: absolute;
-            inset: 0;
-            background: #333;
-            border-radius: 13px;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .toggle-slider::before {
-            content: '';
-            position: absolute;
-            width: 20px;
-            height: 20px;
-            left: 3px;
-            bottom: 3px;
-            background: white;
-            border-radius: 50%;
-            transition: transform 0.2s;
-        }
-        .toggle input:checked + .toggle-slider {
-            background: #22c55e;
-        }
-        .toggle input:checked + .toggle-slider::before {
-            transform: translateX(22px);
-        }
-
-        /* Shader Section */
-        .section-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .shader-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            margin-bottom: 16px;
-        }
-        .shader-item {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 12px 16px;
-            background: #1a1a1a;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: background 0.15s;
-        }
-        .shader-item:hover { background: #252525; }
-        .shader-item.selected {
-            background: #1e3a5f;
-            border: 1px solid #3b82f6;
-        }
-        .shader-check {
-            width: 20px;
-            height: 20px;
-            border: 2px solid #444;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-        }
-        .shader-item.selected .shader-check {
-            background: #3b82f6;
-            border-color: #3b82f6;
-        }
-        .shader-name { flex: 1; font-weight: 500; }
-        .shader-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        /* Buttons */
-        .btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-            transition: opacity 0.15s;
-        }
-        .btn:hover { opacity: 0.85; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-sm { padding: 4px 10px; font-size: 12px; }
-        .btn-primary { background: #3b82f6; color: white; }
-        .btn-warning { background: #f59e0b; color: white; }
-        .btn-danger { background: #ef4444; color: white; }
-        .btn-ghost { background: transparent; color: #888; }
-
-        /* Editor */
-        .editor-section {
-            margin-top: 16px;
-        }
-        .editor-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-        }
-        .editor-header input {
-            flex: 1;
-            padding: 10px 14px;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 8px;
-            color: white;
-            font-size: 14px;
-        }
-        .editor-header input:focus {
-            outline: none;
-            border-color: #3b82f6;
-        }
-        #editor {
-            height: 300px;
-            border-radius: 8px;
-            font-size: 13px;
-        }
-
-        /* Nav */
-        .nav {
-            display: flex;
-            justify-content: flex-end;
-            margin-bottom: 16px;
-        }
-        .nav a {
-            color: #888;
-            text-decoration: none;
-            font-size: 14px;
-        }
-        .nav a:hover { color: #fff; }
     </style>
 </head>
 <body>
+    <div class="toast-container" id="toasts"></div>
     <div class="container">
-        <!-- Status & Nav -->
-        <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div class="header">
             <div class="status">
                 <div class="status-dot" id="statusDot"></div>
                 <span id="statusText">Connecting...</span>
             </div>
-            <nav class="nav">
-                <a href="/ble">BLE Devices</a>
-            </nav>
+            <span style="display:flex;gap:8px;align-items:center">
+                <button onclick="localStorage.clear();location.reload()" style="background:none;border:none;color:#444;cursor:pointer;font-size:10px" title="Clear cache &amp; reconnect">↻</button>
+                <a href="/ble" style="color:#555;text-decoration:none;font-size:11px;">BLE</a>
+            </span>
         </div>
-
-        <!-- LED Preview -->
-        <div class="led-preview">
-            <div class="led-strip" id="ledStrip"></div>
-        </div>
-
-        <!-- Property Controls -->
-        <div class="controls" id="controls">
-            <!-- Controls will be generated here -->
-        </div>
-
-        <!-- Shaders -->
-        <div class="section-title">Animations</div>
-        <div class="shader-list" id="shaderList">
-            <!-- Shader items will be generated here -->
-        </div>
-
-        <!-- Editor -->
-        <div class="editor-section">
-            <div class="editor-header">
-                <input type="text" id="shaderName" placeholder="shader_name">
-                <button class="btn btn-primary" id="saveBtn">Save</button>
-                <button class="btn btn-ghost" id="newBtn">New</button>
-            </div>
-            <div id="editor">-- Rainbow example
-function draw(led_count)
-    for i = 0, led_count - 1 do
-        hsv(i, env.millis / 10 + i * 5, 1, env.brightness)
-    end
-end</div>
-        </div>
+        <div id="app"></div>
     </div>
 
     <script src="/js/proto.js"></script>
+    <script src="/js/ui.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ext-language_tools.min.js"></script>
     <script>
-        // Initialize Ace editor
-        const editor = ace.edit('editor');
-        editor.setTheme('ace/theme/monokai');
-        editor.session.setMode('ace/mode/lua');
-        editor.setOptions({ fontSize: '13px' });
+        const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsMeta = document.querySelector('meta[name="ws-url"]');
+        const wsUrl = wsMeta
+            ? (wsMeta.content.startsWith('//') ? wsProto + wsMeta.content : wsMeta.content)
+            : `${wsProto}//${location.hostname}:81`;
 
-        // State
-        let shaders = [];  // [{id, name, version, bodySize}]
-        let currentShaderIndex = 0;
-        let properties = new Map();
-        let shadersSchema = null;  // Schema for shaders RESOURCE property
-
-        // MicroProto client
-        const wsUrl = `ws://${location.hostname}:81`;
         const client = new MicroProtoClient(wsUrl, { debug: false });
 
         // Connection status
@@ -327,321 +93,24 @@ end</div>
             document.getElementById('statusDot').classList.add('connected');
             document.getElementById('statusText').textContent = 'Connected';
         });
-
         client.on('disconnect', () => {
             document.getElementById('statusDot').classList.remove('connected');
             document.getElementById('statusText').textContent = 'Reconnecting...';
         });
-
-        // Build controls from schema (upsert - replace if exists)
-        client.on('schema', (prop) => {
-            properties.set(prop.name, prop);
-
-            // Store shaders schema for resource operations
-            if (prop.name === 'shaders') {
-                shadersSchema = prop;
-                return;
-            }
-
-            // Skip hidden or special properties (shaderIndex managed by shader list)
-            if (prop.hidden || prop.name === 'ledPreview' || prop.name === 'shaderIndex') return;
-
-            const container = document.getElementById('controls');
-            const existing = container.querySelector(`[data-prop="${prop.name}"]`);
-
-            const control = createControl(prop);
-            if (control) {
-                if (existing) {
-                    existing.replaceWith(control);
-                } else {
-                    container.appendChild(control);
-                }
-            }
+        client.on('error', (err) => {
+            const el = document.createElement('div');
+            el.className = 'toast toast-error';
+            el.textContent = err.message || String(err);
+            document.getElementById('toasts').appendChild(el);
+            setTimeout(() => el.remove(), 4000);
         });
 
-        // Handle property updates
-        client.on('property', (id, name, value, oldValue) => {
-            if (name === 'ledPreview') {
-                updateLedPreview(value);
-            } else if (name === 'shaderIndex') {
-                currentShaderIndex = value;
-                updateShaderSelection();
-            } else if (name === 'shaders') {
-                // RESOURCE property: value is array of {id, version, bodySize, header}
-                // header is the shader name (decoded based on headerTypeDef)
-                shaders = (value || []).map(r => ({
-                    id: r.id,
-                    name: decodeResourceHeader(r.header),
-                    version: r.version,
-                    bodySize: r.bodySize
-                }));
-                renderShaderList();
-            } else {
-                updateControlValue(name, value);
-            }
-        });
-
-        // Decode resource header to string (LIST<UINT8> -> string)
-        function decodeResourceHeader(header) {
-            if (typeof header === 'string') return header;
-            if (Array.isArray(header)) {
-                // Convert byte array to string
-                return String.fromCharCode(...header.filter(b => b !== 0));
-            }
-            return String(header || '');
-        }
-
-        client.on('ready', () => {
-            console.log('MicroProto ready');
-            // Shaders are now loaded automatically via the 'shaders' RESOURCE property
+        // Render all widgets from schema
+        MicroProtoUI.renderAll(document.getElementById('app'), client, {
+            layout: 'two-column'
         });
 
         client.connect();
-
-        // Create control for a property
-        function createControl(prop) {
-            const div = document.createElement('div');
-            div.className = 'control';
-            div.dataset.prop = prop.name;
-            div.style.borderLeftColor = prop.ui.colorHex || '#666';
-
-            const header = document.createElement('div');
-            header.className = 'control-header';
-            header.innerHTML = `
-                <span class="control-icon">${prop.ui.icon || ''}</span>
-                <span class="control-name">${prop.name}</span>
-                <span class="control-value" id="val-${prop.name}"></span>
-            `;
-            div.appendChild(header);
-
-            let input;
-
-            if (prop.typeId === MicroProtoClient.TYPES.BOOL) {
-                // Toggle switch
-                const wrapper = document.createElement('div');
-                wrapper.className = 'toggle-wrapper';
-                wrapper.innerHTML = `
-                    <label class="toggle">
-                        <input type="checkbox" id="input-${prop.name}">
-                        <span class="toggle-slider"></span>
-                    </label>
-                    <span>${prop.description || ''}</span>
-                `;
-                input = wrapper.querySelector('input');
-                input.onchange = () => client.setProperty(prop.name, input.checked);
-                div.appendChild(wrapper);
-            } else if (prop.typeId === MicroProtoClient.TYPES.UINT8 ||
-                       prop.typeId === MicroProtoClient.TYPES.INT8 ||
-                       prop.typeId === MicroProtoClient.TYPES.INT32) {
-                // Slider
-                input = document.createElement('input');
-                input.type = 'range';
-                input.id = `input-${prop.name}`;
-                input.min = prop.constraints.hasMin ? prop.constraints.min : 0;
-                input.max = prop.constraints.hasMax ? prop.constraints.max : 255;
-                if (prop.constraints.hasStep) input.step = prop.constraints.step;
-
-                input.oninput = () => {
-                    const val = parseInt(input.value);
-                    document.getElementById(`val-${prop.name}`).textContent = val;
-                    client.setProperty(prop.name, val);
-                };
-                div.appendChild(input);
-            } else {
-                return null;
-            }
-
-            return div;
-        }
-
-        // Update control value
-        function updateControlValue(name, value) {
-            const input = document.getElementById(`input-${name}`);
-            const valSpan = document.getElementById(`val-${name}`);
-
-            if (input) {
-                if (input.type === 'checkbox') {
-                    input.checked = value;
-                } else {
-                    input.value = value;
-                }
-            }
-            if (valSpan) {
-                valSpan.textContent = value;
-            }
-        }
-
-        // LED Preview
-        function updateLedPreview(rgbArray) {
-            const container = document.getElementById('ledStrip');
-            if (!rgbArray || rgbArray.length === 0) return;
-
-            const ledCount = Math.floor(rgbArray.length / 3);
-
-            // Calculate LED size
-            const maxWidth = container.offsetWidth || 560;
-            const gap = 2;
-            let size = 14;
-            if (ledCount * (size + gap) > maxWidth) {
-                size = Math.max(4, Math.floor(maxWidth / ledCount) - gap);
-            }
-
-            // Rebuild if count changed
-            if (container.childElementCount !== ledCount) {
-                container.innerHTML = '';
-                for (let i = 0; i < ledCount; i++) {
-                    const led = document.createElement('div');
-                    led.className = 'led';
-                    led.style.width = `${size}px`;
-                    led.style.height = `${size}px`;
-                    container.appendChild(led);
-                }
-            }
-
-            // Update colors — boost dim values so low-brightness LEDs are still visible
-            // (real LEDs are visibly bright even at low values; screens show near-black)
-            const leds = container.children;
-            for (let i = 0; i < ledCount; i++) {
-                const r = rgbArray[i * 3];
-                const g = rgbArray[i * 3 + 1];
-                const b = rgbArray[i * 3 + 2];
-                const max = Math.max(r, g, b);
-                if (max > 0) {
-                    // Lift minimum brightness to ~30% so colors stay visible
-                    const boost = Math.max(1, 80 / max);
-                    const dr = Math.min(255, Math.round(r * boost));
-                    const dg = Math.min(255, Math.round(g * boost));
-                    const db = Math.min(255, Math.round(b * boost));
-                    leds[i].style.backgroundColor = `rgb(${dr},${dg},${db})`;
-                } else {
-                    leds[i].style.backgroundColor = `rgb(0,0,0)`;
-                }
-            }
-        }
-
-        // Shader management using MicroProto RESOURCE operations
-
-        function renderShaderList() {
-            const container = document.getElementById('shaderList');
-            container.innerHTML = '';
-
-            shaders.forEach((shader, index) => {
-                const item = document.createElement('div');
-                item.className = 'shader-item';
-                item.dataset.index = index;
-                item.dataset.resourceId = shader.id;
-                item.innerHTML = `
-                    <div class="shader-check"></div>
-                    <span class="shader-name">${shader.name}</span>
-                    <div class="shader-actions">
-                        <button class="btn btn-sm btn-warning" onclick="editShader(${shader.id}, '${shader.name}')">Edit</button>
-                        <button class="btn btn-sm btn-danger" onclick="deleteShader(${shader.id}, '${shader.name}')">Del</button>
-                    </div>
-                `;
-                item.onclick = (e) => {
-                    if (e.target.tagName !== 'BUTTON') {
-                        selectShader(index);
-                    }
-                };
-                container.appendChild(item);
-            });
-
-            updateShaderSelection();
-        }
-
-        function updateShaderSelection() {
-            document.querySelectorAll('.shader-item').forEach((item, idx) => {
-                item.classList.toggle('selected', idx === currentShaderIndex);
-                item.querySelector('.shader-check').textContent = idx === currentShaderIndex ? '✓' : '';
-            });
-        }
-
-        function selectShader(index) {
-            if (index === currentShaderIndex) return;
-            // Update via MicroProto property - this triggers animation change
-            client.setProperty('shaderIndex', index);
-        }
-
-        async function editShader(resourceId, name) {
-            try {
-                document.getElementById('shaderName').value = name;
-                document.getElementById('shaderName').dataset.resourceId = resourceId;
-
-                // Fetch shader body via MicroProto RESOURCE_GET
-                const result = await client.getResource('shaders', resourceId);
-                if (result && result.data) {
-                    // result.data is Uint8Array, decode to string
-                    const code = new TextDecoder().decode(result.data);
-                    editor.setValue(code, -1);
-                }
-            } catch (e) {
-                console.error('Failed to load shader:', e);
-                alert('Failed to load shader: ' + e.message);
-            }
-        }
-
-        async function deleteShader(resourceId, name) {
-            if (!confirm(`Delete shader "${name}"?`)) return;
-
-            try {
-                await client.deleteResource('shaders', resourceId);
-                // Shader list will auto-update via property change
-            } catch (e) {
-                console.error('Failed to delete shader:', e);
-                alert('Failed to delete: ' + e.message);
-            }
-        }
-
-        async function saveShader() {
-            const nameInput = document.getElementById('shaderName');
-            const name = nameInput.value.trim();
-            if (!name) {
-                alert('Enter a shader name');
-                return;
-            }
-
-            try {
-                // Encode name and code as byte arrays
-                const headerBytes = new TextEncoder().encode(name);
-                const bodyBytes = new TextEncoder().encode(editor.getValue());
-
-                // Check if updating existing or creating new
-                const existingId = parseInt(nameInput.dataset.resourceId) || 0;
-
-                // Use putResource - resourceId=0 for new, existing ID for update
-                const result = await client.putResource('shaders', existingId, {
-                    header: headerBytes,
-                    body: bodyBytes
-                });
-
-                // Store the new resource ID
-                if (result && result.resourceId) {
-                    nameInput.dataset.resourceId = result.resourceId;
-                }
-
-                // Shader list will auto-update via property change
-                console.log('Shader saved:', result);
-            } catch (e) {
-                console.error('Failed to save shader:', e);
-                alert('Failed to save: ' + e.message);
-            }
-        }
-
-        function newShader() {
-            const nameInput = document.getElementById('shaderName');
-            nameInput.value = '';
-            nameInput.dataset.resourceId = '0';  // Clear resource ID for new shader
-            editor.setValue(`-- New shader
-function draw(led_count)
-    for i = 0, led_count - 1 do
-        hsv(i, env.millis / 10 + i * 5, 1, env.brightness)
-    end
-end`, -1);
-        }
-
-        // Button handlers
-        document.getElementById('saveBtn').onclick = saveShader;
-        document.getElementById('newBtn').onclick = newShader;
     </script>
 </body>
 </html>

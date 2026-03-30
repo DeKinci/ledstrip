@@ -122,6 +122,71 @@ size_t PropertyEncoder::encodeAllValues(WriteBuffer& buf) {
     return encoded;
 }
 
+// =========== Function Schema Encoder ===========
+
+bool SchemaEncoder::encodeFunction(WriteBuffer& buf, const FunctionBase* func) {
+    if (!buf.writeByte(encodeOpHeader(OpCode::SCHEMA_UPSERT, 0))) return false;
+    return encodeFunctionItem(buf, func);
+}
+
+size_t SchemaEncoder::encodeAllFunctions(WriteBuffer& buf) {
+    size_t count = FunctionBase::count;
+    if (count == 0) return 0;
+
+    if (!buf.writeByte(encodeOpHeader(OpCode::SCHEMA_UPSERT, Flags::BATCH))) return 0;
+    if (!buf.writeByte(static_cast<uint8_t>(count - 1))) return 0;
+
+    size_t encoded = 0;
+    for (uint8_t i = 0; i < count; i++) {
+        FunctionBase* func = FunctionBase::byId[i];
+        if (!func || !encodeFunctionItem(buf, func)) return 0;
+        encoded++;
+    }
+
+    return encoded;
+}
+
+bool SchemaEncoder::encodeFunctionItem(WriteBuffer& buf, const FunctionBase* func) {
+    // Item type flags: type=FUNCTION(2), no property-specific flags
+    uint8_t itemType = static_cast<uint8_t>(SchemaItemType::FUNCTION);
+    if (!buf.writeByte(itemType)) return false;
+
+    // Level flags: LOCAL=0, ble_exposed bit
+    uint8_t levelFlags = 0;
+    if (func->ble_exposed) levelFlags |= (1 << 2);
+    if (!buf.writeByte(levelFlags)) return false;
+
+    // Function ID
+    if (!buf.writePropId(func->id)) return false;
+
+    // Namespace ID (0 = root)
+    if (!buf.writePropId(0)) return false;
+
+    // Name
+    if (!buf.writeIdent(func->name)) return false;
+
+    // Description
+    if (!buf.writeUtf8(func->description)) return false;
+
+    // Parameter count
+    if (!buf.writeByte(func->paramCount)) return false;
+
+    // Parameters: name + DATA_TYPE_DEFINITION (basic type: typeId + validation_flags=0)
+    for (uint8_t i = 0; i < func->paramCount; i++) {
+        if (!buf.writeIdent(func->params[i].name)) return false;
+        if (!buf.writeByte(func->params[i].typeId)) return false;
+        if (!buf.writeByte(0)) return false;  // validation_flags = none
+    }
+
+    // Return type: DATA_TYPE_DEFINITION (TYPE_VOID=0 means no return value)
+    if (!buf.writeByte(func->returnTypeId)) return false;
+    if (func->returnTypeId != TYPE_VOID) {
+        if (!buf.writeByte(0)) return false;  // validation_flags = none
+    }
+
+    return true;
+}
+
 // =========== SCHEMA_DELETE Encoder ===========
 
 bool SchemaDeleteEncoder::encodePropertyDelete(WriteBuffer& buf, uint16_t propertyId) {

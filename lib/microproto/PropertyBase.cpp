@@ -10,6 +10,7 @@ namespace MicroProto {
 std::array<PropertyBase*, PropertyBase::MAX_PROPERTIES> PropertyBase::byId = {};
 uint8_t PropertyBase::count = 0;
 uint8_t PropertyBase::nextId = 0;
+uint16_t PropertyBase::schemaVersion = 0;
 
 PropertyBase::PropertyBase(
     const char* name,

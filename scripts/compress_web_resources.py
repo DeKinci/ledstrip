@@ -18,6 +18,17 @@ except ImportError:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "brotli"])
     import brotli
 
+# Build widgets before compressing (if web/build.sh exists)
+import subprocess
+try:
+    _script_dir = os.path.dirname(os.path.abspath(__file__))
+except NameError:
+    _script_dir = os.path.abspath("scripts")
+_web_build = os.path.join(os.path.dirname(_script_dir), "web", "build.sh")
+if os.path.exists(_web_build):
+    print("Building widgets...")
+    subprocess.run(["bash", _web_build], check=True)
+
 # Configuration
 BROTLI_QUALITY = 11  # Maximum compression (slower build, smallest size)
 RESOURCES_FILE = "rsc/resources.txt"

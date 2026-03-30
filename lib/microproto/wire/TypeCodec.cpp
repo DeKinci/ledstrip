@@ -105,20 +105,11 @@ bool TypeCodec::decodeProperty(ReadBuffer& buf, PropertyBase* prop) {
     }
 
     if (typeId == TYPE_OBJECT) {
-        // OBJECT: Field values in schema order
+        // OBJECT: read raw bytes, then set on property
         size_t size = prop->getSize();
-
-        // Temporary buffer for decoding
         uint8_t temp[MICROPROTO_DECODE_BUFFER_SIZE];
-        if (size > sizeof(temp)) {
-            return false;  // Object too large
-        }
-
-        // Read raw bytes (fields are packed)
-        if (!buf.readBytes(temp, size)) {
-            return false;
-        }
-
+        if (size > sizeof(temp)) return false;
+        if (!buf.readBytes(temp, size)) return false;
         prop->setData(temp, size);
         return true;
     }

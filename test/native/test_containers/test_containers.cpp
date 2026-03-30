@@ -1416,6 +1416,76 @@ void test_list_property_runtime_element_validation() {
     TEST_ASSERT_EQUAL(25, levels[0]);  // Unchanged
 }
 
+// ============== Readonly Tests ==============
+
+void test_readonly_property_blocks_setdata() {
+    Property<uint8_t> prop("ro", 42, PropertyLevel::LOCAL,
+        Constraints<uint8_t>(), "test", UIHints(), false, true);  // readonly=true
+    TEST_ASSERT_EQUAL(42, prop.get());
+
+    // setData (client write path) should be blocked
+    uint8_t val = 99;
+    prop.setData(&val, sizeof(val));
+    TEST_ASSERT_EQUAL(42, prop.get());  // unchanged
+}
+
+void test_readonly_property_allows_operator_assign() {
+    Property<uint8_t> prop("ro2", 42, PropertyLevel::LOCAL,
+        Constraints<uint8_t>(), "test", UIHints(), false, true);
+
+    // Internal write via operator= should work
+    prop = 99;
+    TEST_ASSERT_EQUAL(99, prop.get());
+}
+
+void test_readonly_list_blocks_setdata() {
+    ListProperty<uint8_t, 10> list("rolist", PropertyLevel::LOCAL,
+        "test", UIHints(), false, true);  // readonly=true
+    list.push(1);
+    list.push(2);
+    TEST_ASSERT_EQUAL(2, list.count());
+
+    // setData should be blocked
+    uint8_t data[] = {10, 20, 30};
+    list.setData(data, sizeof(data));
+    TEST_ASSERT_EQUAL(2, list.count());  // unchanged
+    TEST_ASSERT_EQUAL(1, list[0]);
+}
+
+void test_readonly_list_allows_set() {
+    ListProperty<uint8_t, 10> list("rolist2", PropertyLevel::LOCAL,
+        "test", UIHints(), false, true);
+    list.push(1);
+    list.push(2);
+
+    // Internal set() should work
+    list.set(0, 99);
+    TEST_ASSERT_EQUAL(99, list[0]);
+}
+
+void test_readonly_list_allows_push_pop_resize_clear() {
+    ListProperty<uint8_t, 10> list("rolist3", PropertyLevel::LOCAL,
+        "test", UIHints(), false, true);
+
+    // push
+    TEST_ASSERT_TRUE(list.push(1));
+    TEST_ASSERT_TRUE(list.push(2));
+    TEST_ASSERT_TRUE(list.push(3));
+    TEST_ASSERT_EQUAL(3, list.count());
+
+    // pop
+    list.pop();
+    TEST_ASSERT_EQUAL(2, list.count());
+
+    // resize
+    list.resize(5);
+    TEST_ASSERT_EQUAL(5, list.count());
+
+    // clear
+    list.clear();
+    TEST_ASSERT_EQUAL(0, list.count());
+}
+
 // ============== Main ==============
 
 int main(int argc, char **argv) {
@@ -1521,6 +1591,13 @@ int main(int argc, char **argv) {
     RUN_TEST(test_property_tryset_returns_success);
     RUN_TEST(test_array_property_runtime_element_validation);
     RUN_TEST(test_list_property_runtime_element_validation);
+
+    // Readonly tests
+    RUN_TEST(test_readonly_property_blocks_setdata);
+    RUN_TEST(test_readonly_property_allows_operator_assign);
+    RUN_TEST(test_readonly_list_blocks_setdata);
+    RUN_TEST(test_readonly_list_allows_set);
+    RUN_TEST(test_readonly_list_allows_push_pop_resize_clear);
 
     return UNITY_END();
 }

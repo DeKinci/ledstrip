@@ -34,6 +34,10 @@ void PropertySystem::init() {
     // Load persistent properties from NVS
     LOG_DEBUG(TAG, "Loading from storage...");
     loadFromStorage();
+
+    // Initialize schema version (compare property count with saved, bump if changed)
+    PropertyStorage::initSchemaVersion();
+
     LOG_DEBUG(TAG, "Init complete");
 }
 

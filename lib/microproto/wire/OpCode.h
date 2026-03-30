@@ -5,6 +5,9 @@
 
 namespace MicroProto {
 
+// Sentinel: no client excluded from broadcast
+static constexpr uint8_t NO_EXCLUDE = 0xFF;
+
 /**
  * Operation codes from MicroProto protocol spec v1 (MVP)
  *
@@ -74,6 +77,7 @@ inline void decodeOpHeader(uint8_t byte, OpCode& opcode, uint8_t& flags) {
  *
  * HELLO (0x0):
  *   bit0: is_response    // 0=request, 1=response
+ *   bit1: idle           // 1=register but stay idle (no sync/broadcasts)
  *
  * PROPERTY_UPDATE (0x1):
  *   bit0: batch          // 1=batched (batch_count follows)

@@ -51,7 +51,7 @@ bool MessageRouter::process(uint8_t clientId, const uint8_t* data, size_t length
 
 bool MessageRouter::processHello(ReadBuffer& buf, uint8_t flags) {
     Hello hello;
-    if (!Hello::decodePayload(buf, (flags & Flags::IS_RESPONSE) != 0, hello)) {
+    if (!Hello::decodePayload(buf, flags, hello)) {
         return false;
     }
     _handler->onHello(_clientId, hello);

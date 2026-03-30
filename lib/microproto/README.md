@@ -60,7 +60,8 @@ HELLO serves dual purposes:
 **Flags**:
 ```
 bit0: is_response    // 0=request (client→server), 1=response (server→client)
-bit1-3: reserved
+bit1: idle           // 1=register but stay idle (no schema/values/broadcasts)
+bit2-3: reserved
 ```
 
 ### 2.2 Connection Establishment
@@ -73,6 +74,7 @@ u8 operation_header { opcode: 0x0, flags: 0x0 }
 u8 protocol_version        // Protocol version (current: 1)
 varint max_packet_size     // Maximum packet size client can receive
 varint device_id           // Unique device identifier
+u16 schema_version         // Cached schema version (0 = no cache)
 ```
 
 **Semantics**: "I am (re)connecting. Please send me complete state."
@@ -84,13 +86,16 @@ u8 protocol_version        // Protocol version (current: 1)
 varint max_packet_size     // Maximum packet size server can receive
 varint session_id          // Unique session identifier
 varint server_timestamp    // Unix timestamp for sync
+u16 schema_version         // Current server schema version
 ```
 
 **Semantics**: "Reset your state. Complete schema and properties follow."
 
-3. **Server sends SCHEMA_UPSERT** (batched):
+3. **Server sends SCHEMA_UPSERT** (batched, **skipped if client schema_version matches**):
    - Complete schema definition of all properties and functions
    - Client must clear any existing schema before processing
+   - If client sent a non-zero schema_version that matches the server's,
+     the server skips this step — client uses its cached schema
 
 4. **Server sends PROPERTY_UPDATE** (batched):
    - Current values for all properties
@@ -105,6 +110,25 @@ If client becomes out-of-sync (e.g., missed messages, unknown id, timeout, netwo
 - Server treats it as fresh connection: sends HELLO → SCHEMA_UPSERT → PROPERTY_UPDATE
 - Client clears local state and rebuilds from server messages
 
+### 2.4 Idle Mode (Gateway Support)
+
+The `idle` flag (bit1) enables lightweight registration without full state synchronization.
+This is used by gateway proxies to maintain device presence without unnecessary traffic.
+
+**Idle registration:**
+1. Device → Gateway: HELLO {idle=1, device_id, ...} — "I'm here, don't sync"
+2. Gateway → Device: HELLO {idle=1, is_response=1} — "Registered, stay idle"
+3. Connection stays open (periodic PING for keepalive), no broadcasts
+
+**Activation (web client connects to device via gateway):**
+1. Gateway → Device: HELLO {idle=0} — "Activate, send me everything"
+2. Device → Gateway: HELLO {is_response=1, schema_version} + SCHEMA_UPSERT + PROPERTY_UPDATE
+3. Device sends ongoing broadcasts to this connection
+
+**Deactivation (last web client disconnects):**
+1. Gateway → Device: HELLO {idle=1} — "Go idle"
+2. Device stops broadcasting, connection stays open for re-activation
+
 ---
 
 ## 3. Type System
@@ -118,7 +142,9 @@ If client becomes out-of-sync (e.g., missed messages, unknown id, timeout, netwo
 | 0x03 | UINT8 | 1 | Unsigned 8-bit integer |
 | 0x04 | INT32 | 4 | Signed 32-bit integer (little-endian) |
 | 0x05 | FLOAT32 | 4 | IEEE 754 single precision float (little-endian) |
-| 0x06-0x1F | RESERVED | - | Reserved for future basic types |
+| 0x06 | INT16 | 2 | Signed 16-bit integer |
+| 0x07 | UINT16 | 2 | Unsigned 16-bit integer |
+| 0x08-0x1F | RESERVED | - | Reserved for future basic types |
 
 ### 3.2 Composite Types (Containers)
 

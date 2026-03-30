@@ -40,7 +40,7 @@ void test_hello_request_encode() {
 void test_hello_request_roundtrip() {
     uint8_t buf[32];
 
-    Hello original = Hello::request(0xDEADBEEF, 8192);
+    Hello original = Hello::request(0xDEADBEEF, 8192, 42);
 
     WriteBuffer wb(buf, sizeof(buf));
     TEST_ASSERT_TRUE(original.encode(wb));
@@ -53,6 +53,7 @@ void test_hello_request_roundtrip() {
     TEST_ASSERT_EQUAL(original.protocolVersion, decoded.protocolVersion);
     TEST_ASSERT_EQUAL(original.maxPacketSize, decoded.maxPacketSize);
     TEST_ASSERT_EQUAL(original.deviceId, decoded.deviceId);
+    TEST_ASSERT_EQUAL(42, decoded.schemaVersion);
 }
 
 void test_hello_response_encode() {
@@ -72,7 +73,7 @@ void test_hello_response_encode() {
 void test_hello_response_roundtrip() {
     uint8_t buf[32];
 
-    Hello original = Hello::response(0x11223344, 1700000000, 2048);
+    Hello original = Hello::response(0x11223344, 1700000000, 2048, 7);
 
     WriteBuffer wb(buf, sizeof(buf));
     TEST_ASSERT_TRUE(original.encode(wb));
@@ -86,6 +87,7 @@ void test_hello_response_roundtrip() {
     TEST_ASSERT_EQUAL(original.maxPacketSize, decoded.maxPacketSize);
     TEST_ASSERT_EQUAL(original.sessionId, decoded.sessionId);
     TEST_ASSERT_EQUAL(original.serverTimestamp, decoded.serverTimestamp);
+    TEST_ASSERT_EQUAL(7, decoded.schemaVersion);
 }
 
 // ==== ERROR Tests ====

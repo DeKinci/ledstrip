@@ -35,6 +35,8 @@ struct is_microproto_basic_type : std::false_type {};
 template<> struct is_microproto_basic_type<bool> : std::true_type {};
 template<> struct is_microproto_basic_type<int8_t> : std::true_type {};
 template<> struct is_microproto_basic_type<uint8_t> : std::true_type {};
+template<> struct is_microproto_basic_type<int16_t> : std::true_type {};
+template<> struct is_microproto_basic_type<uint16_t> : std::true_type {};
 template<> struct is_microproto_basic_type<int32_t> : std::true_type {};
 template<> struct is_microproto_basic_type<float> : std::true_type {};
 
@@ -75,13 +77,23 @@ template<typename T>
 inline constexpr bool is_microproto_container_v = is_microproto_container<T>::value;
 
 // ---------------------------------------------------------------------------
-// Struct types: trivially copyable, non-basic, non-container, non-pointer
+// MicroVariant detection (forward declared, defined in VariantProperty.h)
+// ---------------------------------------------------------------------------
+template<size_t MaxDataSize> struct MicroVariant;
+
+template<typename T> struct is_micro_variant : std::false_type {};
+template<size_t N> struct is_micro_variant<MicroVariant<N>> : std::true_type {};
+template<typename T> inline constexpr bool is_micro_variant_v = is_micro_variant<T>::value;
+
+// ---------------------------------------------------------------------------
+// Struct types: trivially copyable, non-basic, non-container, non-pointer, non-variant
 // ---------------------------------------------------------------------------
 template<typename T>
 struct is_microproto_struct : std::bool_constant<
     std::is_trivially_copyable_v<T> &&
     !is_microproto_basic_type_v<T> &&
     !is_microproto_container_v<T> &&
+    !is_micro_variant_v<T> &&
     !std::is_pointer_v<T> &&
     !std::is_reference_v<T> &&
     !std::is_array_v<T>  // C-style arrays not allowed
@@ -91,14 +103,15 @@ template<typename T>
 inline constexpr bool is_microproto_struct_v = is_microproto_struct<T>::value;
 
 // ---------------------------------------------------------------------------
-// Valid MicroProto type: basic OR string OR container OR struct
+// Valid MicroProto type: basic OR string OR container OR struct OR variant
 // ---------------------------------------------------------------------------
 template<typename T>
 struct is_microproto_type : std::bool_constant<
     is_microproto_basic_type_v<T> ||
     is_microproto_string_v<T> ||
     is_microproto_container_v<T> ||
-    is_microproto_struct_v<T>
+    is_microproto_struct_v<T> ||
+    is_micro_variant_v<T>
 > {};
 
 template<typename T>
@@ -110,10 +123,10 @@ inline constexpr bool is_microproto_type_v = is_microproto_type<T>::value;
 // MicroList and containers of MicroList are variable-size.
 // ---------------------------------------------------------------------------
 
-// Primary template: fixed if basic type or struct
+// Primary template: fixed if basic type, struct, or variant
 template<typename T>
 struct is_microproto_fixed_size : std::bool_constant<
-    is_microproto_basic_type_v<T> || is_microproto_struct_v<T>
+    is_microproto_basic_type_v<T> || is_microproto_struct_v<T> || is_micro_variant_v<T>
 > {};
 
 // std::array is fixed-size only if element is fixed-size
@@ -143,13 +156,14 @@ struct microproto_type_error {
 // Type IDs from MicroProto protocol spec
 // IMPORTANT: These are spec-defined. Do NOT extend without updating the protocol spec.
 //
-// Basic types (0x01-0x05)
+// Basic types (0x01-0x07)
 constexpr uint8_t TYPE_BOOL = 0x01;
 constexpr uint8_t TYPE_INT8 = 0x02;
 constexpr uint8_t TYPE_UINT8 = 0x03;
 constexpr uint8_t TYPE_INT32 = 0x04;
 constexpr uint8_t TYPE_FLOAT32 = 0x05;
-// NOTE: int16/uint16/uint32 intentionally omitted - use int32 for all integers
+constexpr uint8_t TYPE_INT16 = 0x06;
+constexpr uint8_t TYPE_UINT16 = 0x07;
 //
 // Container types (0x20-0x24)
 constexpr uint8_t TYPE_ARRAY = 0x20;    // Fixed-size homogeneous
@@ -165,46 +179,63 @@ constexpr bool isContainerType(uint8_t typeId) {
 
 // Helper to check if type is basic
 constexpr bool isBasicType(uint8_t typeId) {
-    return typeId >= 0x01 && typeId <= 0x05;
+    return typeId >= 0x01 && typeId <= 0x07;
 }
 
-// Type traits for basic types
-template<typename T>
-struct TypeTraits;
+// Type traits — primary template handles struct types (OBJECT)
+template<typename T, typename = void>
+struct TypeTraits {
+    static_assert(is_microproto_struct_v<T>,
+        "TypeTraits: type must be a basic MicroProto type, container, or trivially copyable struct");
+    static constexpr uint8_t type_id = TYPE_OBJECT;
+    static constexpr size_t size = sizeof(T);
+};
 
 template<>
-struct TypeTraits<bool> {
+struct TypeTraits<bool, void> {
     static constexpr uint8_t type_id = TYPE_BOOL;
     static constexpr size_t size = 1;
 };
 
 template<>
-struct TypeTraits<uint8_t> {
+struct TypeTraits<uint8_t, void> {
     static constexpr uint8_t type_id = TYPE_UINT8;
     static constexpr size_t size = 1;
 };
 
 template<>
-struct TypeTraits<int8_t> {
+struct TypeTraits<int8_t, void> {
     static constexpr uint8_t type_id = TYPE_INT8;
     static constexpr size_t size = 1;
 };
 
 template<>
-struct TypeTraits<int32_t> {
+struct TypeTraits<int32_t, void> {
     static constexpr uint8_t type_id = TYPE_INT32;
     static constexpr size_t size = 4;
 };
 
 template<>
-struct TypeTraits<float> {
+struct TypeTraits<float, void> {
     static constexpr uint8_t type_id = TYPE_FLOAT32;
     static constexpr size_t size = 4;
 };
 
+template<>
+struct TypeTraits<int16_t, void> {
+    static constexpr uint8_t type_id = TYPE_INT16;
+    static constexpr size_t size = 2;
+};
+
+template<>
+struct TypeTraits<uint16_t, void> {
+    static constexpr uint8_t type_id = TYPE_UINT16;
+    static constexpr size_t size = 2;
+};
+
 // TypeTraits for Value<T> - transparent wrapper, delegates to T
 template<typename T>
-struct TypeTraits<Value<T>> {
+struct TypeTraits<Value<T>, void> {
     static constexpr uint8_t type_id = TypeTraits<T>::type_id;
     static constexpr size_t size = TypeTraits<T>::size;
 };
@@ -212,7 +243,7 @@ struct TypeTraits<Value<T>> {
 // TypeTraits for std::array (ARRAY container type)
 // Supports nested containers: std::array<MicroList<...>, N>, std::array<std::array<...>, N>
 template<typename T, size_t N>
-struct TypeTraits<std::array<T, N>> {
+struct TypeTraits<std::array<T, N>, void> {
     static_assert(is_microproto_type_v<T>,
         "std::array element type must be a valid MicroProto type");
 
@@ -240,7 +271,7 @@ struct TypeTraits<std::array<T, N>> {
 // TypeTraits for MicroList (LIST container type)
 // Supports nested containers: MicroList<std::array<...>>, MicroList<MicroList<...>>
 template<typename T, size_t InlineCapacity, size_t MaxCapacity>
-struct TypeTraits<MicroList<T, InlineCapacity, MaxCapacity>> {
+struct TypeTraits<MicroList<T, InlineCapacity, MaxCapacity>, void> {
     static_assert(is_microproto_type_v<T>,
         "MicroList element type must be a valid MicroProto type");
 

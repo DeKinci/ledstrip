@@ -372,7 +372,7 @@ public:
         }
 
 #ifdef ARDUINO
-        return PropertyStorage::saveRaw(id, buffer, pos);
+        return PropertyStorage::saveRaw(name, buffer, pos);
 #else
         (void)buffer; (void)pos;
         return true;  // Stub for native tests
@@ -384,7 +384,7 @@ public:
         uint8_t buffer[maxSize];
 
 #ifdef ARDUINO
-        size_t bytesRead = PropertyStorage::loadRaw(id, buffer, maxSize);
+        size_t bytesRead = PropertyStorage::loadRaw(name, buffer, maxSize);
 #else
         size_t bytesRead = 0;  // Stub for native tests
 #endif
@@ -747,7 +747,7 @@ public:
         }
 
 #ifdef ARDUINO
-        return PropertyStorage::saveRaw(id, buffer, pos);
+        return PropertyStorage::saveRaw(name, buffer, pos);
 #else
         (void)buffer; (void)pos;
         return true;  // Stub for native tests
@@ -759,7 +759,7 @@ public:
         uint8_t buffer[maxSize];
 
 #ifdef ARDUINO
-        size_t bytesRead = PropertyStorage::loadRaw(id, buffer, maxSize);
+        size_t bytesRead = PropertyStorage::loadRaw(name, buffer, maxSize);
 #else
         size_t bytesRead = 0;  // Stub for native tests
 #endif

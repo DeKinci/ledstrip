@@ -378,6 +378,16 @@ constexpr const char* get_field_name(size_t index) {
     return field_names<T>::get(index);
 }
 
+/**
+ * Variant type definitions registry (for MicroVariant in containers/structs).
+ * Use MICROPROTO_VARIANT_TYPES macro to register.
+ */
+template<typename T>
+struct variant_types {
+    static constexpr bool registered = false;
+    static constexpr size_t count = 0;
+};
+
 } // namespace reflect
 } // namespace MicroProto
 

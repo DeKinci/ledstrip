@@ -5,6 +5,7 @@
 #include "../wire/OpCode.h"
 #include "../wire/TypeCodec.h"
 #include "../PropertyBase.h"
+#include "../FunctionBase.h"
 
 namespace MicroProto {
 
@@ -21,9 +22,13 @@ class SchemaEncoder {
 public:
     static bool encodeProperty(WriteBuffer& buf, const PropertyBase* prop);
     static size_t encodeAllProperties(WriteBuffer& buf);
-
-private:
+    // Encode a single property's schema data (without opcode header)
     static bool encodePropertyItem(WriteBuffer& buf, const PropertyBase* prop);
+
+    // Function schema encoding
+    static bool encodeFunction(WriteBuffer& buf, const FunctionBase* func);
+    static size_t encodeAllFunctions(WriteBuffer& buf);
+    static bool encodeFunctionItem(WriteBuffer& buf, const FunctionBase* func);
 };
 
 /**

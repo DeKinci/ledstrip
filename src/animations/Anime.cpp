@@ -11,6 +11,8 @@
 
 static const char* TAG = "Anime";
 
+using PB = MicroProto::PropertyBase;
+
 namespace {
 
 std::array<CRGB, LED_LIMIT> leds = {};
@@ -29,7 +31,7 @@ MicroProto::Property<uint8_t> shaderIndex("shaderIndex", 0, MicroProto::Property
     MicroProto::Constraints<uint8_t>().min(0).max(255),
     "Current animation index",
     MicroProto::UIHints().setColor(MicroProto::UIColor::CYAN).setIcon("🎬"),
-    true);  // persistent
+    PB::PERSISTENT, PB::NOT_READONLY, PB::HIDDEN);
 
 // Active LED count
 MicroProto::Property<uint8_t> ledCount("ledCount", LED_LIMIT, MicroProto::PropertyLevel::LOCAL,
@@ -38,17 +40,38 @@ MicroProto::Property<uint8_t> ledCount("ledCount", LED_LIMIT, MicroProto::Proper
     MicroProto::UIHints().setColor(MicroProto::UIColor::LIME).setIcon("💡"),
     true);  // persistent
 
+// Shader parameters — exposed as env.color and env.speed in Lua
+MicroProto::Property<uint8_t> paramColor("color", 0, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<uint8_t>().min(0).max(255),
+    "Color parameter (hue)",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::VIOLET).setIcon("🎨"),
+    true);
+
+MicroProto::Property<float> paramSpeed("speed", 1.0f, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<float>().min(0.0f).max(2.0f).step(0.01f),
+    "Speed multiplier",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::SKY).setIcon("⚡"),
+    true);
+
 // Atmospheric fade toggle
 MicroProto::Property<bool> atmosphericFadeProp("atmosphericFade", false, MicroProto::PropertyLevel::LOCAL,
     "Gradual brightness fade (kerosene lamp effect)",
     MicroProto::UIHints().setColor(MicroProto::UIColor::ORANGE).setIcon("🕯️"),
     true);  // persistent
 
+// Last shader error — sent to UI via MicroProto
+MicroProto::StringProperty<128> shaderError("shaderError",
+    MicroProto::PropertyLevel::LOCAL,
+    "Last shader error",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::ROSE).setIcon("⚠️").setWidget(MicroProto::Widget::Text::ERROR_DISPLAY),
+    PB::NOT_PERSISTENT);
+
 // LED RGB preview stream (3 bytes per LED: R, G, B, R, G, B, ...)
 MicroProto::ListProperty<uint8_t, LED_LIMIT * 3> ledPreview("ledPreview", {}, MicroProto::PropertyLevel::LOCAL,
     MicroProto::ListConstraints<uint8_t>().maxLength(LED_LIMIT * 3),
     "Live LED preview RGB values",
-    MicroProto::UIHints().setColor(MicroProto::UIColor::PINK).setIcon("🌈"));
+    MicroProto::UIHints().setColor(MicroProto::UIColor::PINK).setIcon("🌈").setWidget(MicroProto::Widget::LedData::LED_CANVAS),
+    PB::NOT_PERSISTENT, PB::READONLY, PB::HIDDEN);
 
 // Shader resources: header = name (bytes, max 64), body = Lua code (bytes)
 // Max 16 shaders, headers sync automatically via PROPERTY_UPDATE
@@ -59,12 +82,50 @@ MicroProto::ResourceProperty<16, 64> shadersResource(
     MicroProto::ResourceTypeDef(MicroProto::TYPE_LIST, 0),    // body = Lua code (byte array, variable length)
     MicroProto::PropertyLevel::LOCAL,
     "Animation shaders",
-    MicroProto::UIHints().setColor(MicroProto::UIColor::CYAN).setIcon("🎨"),
+    MicroProto::UIHints().setColor(MicroProto::UIColor::CYAN).setIcon("🎨").setWidget(MicroProto::Widget::Resource::CODE_EDITOR),
     true,   // persistent
     false,  // not hidden
     false,  // not BLE exposed
     0       // group_id
 );
+
+// LED segment mapping — LIST of OBJECT with per-field schema
+MicroProto::ListProperty<SegmentData, MAX_SEGMENTS> segmentsList(
+    "segments",
+    MicroProto::PropertyLevel::LOCAL,
+    "LED segment mapping",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::TEAL).setIcon("🗺️").setWidget(MicroProto::Widget::ObjectList::SEGMENT_EDITOR),
+    PB::PERSISTENT
+);
+
+// Runtime segment views (rebuilt on config change)
+std::array<SegmentView, MAX_SEGMENTS> segmentViews = {};
+uint8_t segmentViewCount = 0;
+
+// "all LEDs" view — always available as `led` in Lua
+SegmentData allLedsData = {};
+SegmentView allLedsView = {};
+
+void rebuildSegmentViews() {
+    segmentViewCount = segmentsList.count();
+    const SegmentData* segData = segmentsList.data();
+    uint16_t startIndex = 0;
+    for (size_t i = 0; i < segmentViewCount; i++) {
+        segmentViews[i].data = &segData[i];
+        segmentViews[i].leds = &leds[startIndex];
+        segmentViews[i].ledCount = segData[i].ledCount;
+        startIndex += segData[i].ledCount;
+    }
+
+    // Update "all LEDs" view
+    memset(&allLedsData, 0, sizeof(allLedsData));
+    memcpy(allLedsData.name.data(), "led", 3);
+    allLedsData.flags = SEG_LINE;
+    allLedsData.ledCount = static_cast<uint16_t>(currentLeds);
+    allLedsView.data = &allLedsData;
+    allLedsView.leds = leds.data();
+    allLedsView.ledCount = currentLeds;
+}
 
 // Mapping from index to resourceId (rebuilt on reload)
 std::vector<uint32_t> shaderResourceIds = {};
@@ -76,6 +137,7 @@ LuaAnimation *currentAnimation = nullptr;
 long lastUpdate = 0;
 
 bool toReload = false;
+bool animationErrored = false;
 
 uint32_t animationTime = 0;
 uint32_t animationIteration = 0;
@@ -134,6 +196,7 @@ void updateLedPreview() {
     static uint32_t lastUpdate = 0;
     if (millis() - lastUpdate < 100) return;  // 10 Hz
     lastUpdate = millis();
+    static uint32_t lpLog = 0;
 
     // Update preview with current LED RGB values
     ledPreview.resize(currentLeds * 3);
@@ -146,8 +209,9 @@ void updateLedPreview() {
 
 void setCurrentAnimation(LuaAnimation *animation) {
     currentAnimation = animation;
-    // shaderIndex property is persisted and will be restored on reboot
-    // No need to save animation name separately
+    animationErrored = false;
+    if (animation) shaderError.setString("");
+    for (size_t i = 0; i < currentLeds; i++) leds[i] = CRGB(0, 0, 0);
 }
 
 CallResult<LuaAnimation *> loadCached(uint16_t index) {
@@ -196,10 +260,12 @@ CallResult<LuaAnimation *> loadCached(uint16_t index) {
     LOG_DEBUG(TAG, "  After animation->begin, Free: %d bytes", ESP.getFreeHeap());
 
     if (beginResult.hasError()) {
+        shaderError.setString(beginResult.getMessage().c_str());
         delete animation;
         return CallResult<LuaAnimation *>(nullptr, beginResult.getCode(), beginResult.getMessage().c_str());
     }
 
+    shaderError.setString("");
     loadedAnimations.push_back(animation);
     if (loadedAnimations.size() > CACHE_SIZE) {
         LuaAnimation *toRemove = loadedAnimations[0];
@@ -252,35 +318,34 @@ CallResult<void *> reload() {
         struct DefaultShader { const char* name; const char* code; };
         static const DefaultShader defaults[] = {
             {"rainbow",
-                "function draw(n)\n"
-                "  for i=0,n-1 do\n"
-                "    hsv(i, env.millis/10 + i*5, 1, env.brightness)\n"
+                "function draw()\n"
+                "  for i in led do\n"
+                "    led[i] = hsv(e.clr + e.time * 100 * e.spd + i * 5, 1, e.lum)\n"
                 "  end\n"
                 "end"
             },
             {"breathe",
-                "function draw(n)\n"
-                "  local b = (math.sin(env.millis/1000) + 1) * 0.5\n"
-                "  for i=0,n-1 do\n"
-                "    hsv(i, 0, 0, b * env.brightness)\n"
+                "function draw()\n"
+                "  local b = (math.sin(e.time * e.spd) + 1) * 0.5\n"
+                "  for i in led do\n"
+                "    led[i] = hsv(e.clr, 0, b * e.lum)\n"
                 "  end\n"
                 "end"
             },
             {"fire",
-                "function draw(n)\n"
-                "  for i=0,n-1 do\n"
-                "    local flicker = math.random(100, 255) / 255\n"
-                "    hsv(i, math.random(0, 30), 1, flicker * env.brightness)\n"
+                "function draw()\n"
+                "  for i in led do\n"
+                "    led[i] = hsv(e.clr + jitter(15, 15, 0.3 / e.spd), 1, jitter(0.7, 0.3, 0.2 / e.spd) * e.lum)\n"
                 "  end\n"
                 "end"
             },
             {"comet",
-                "function draw(n)\n"
-                "  local pos = (env.millis / 20) % n\n"
-                "  for i=0,n-1 do\n"
-                "    local dist = (i - pos) % n\n"
+                "function draw()\n"
+                "  local pos = (e.time * 50 * e.spd) % #led + 1\n"
+                "  for i in led do\n"
+                "    local dist = (i - pos) % #led\n"
                 "    local tail = math.max(0, 1 - dist / 8.5)\n"
-                "    hsv(i, 160, 1, tail * env.brightness)\n"
+                "    led[i] = hsv(e.clr, 1, tail * e.lum)\n"
                 "  end\n"
                 "end"
             },
@@ -346,6 +411,7 @@ CallResult<void *> connect() {
         for (size_t i = newCount; i < LED_LIMIT; i++) {
             leds[i] = CRGB(0, 0, 0);
         }
+        rebuildSegmentViews();
     });
 
     shadersResource.onChange([]() {
@@ -363,8 +429,16 @@ CallResult<void *> connect() {
         }
     });
 
-    // Load initial LED count from property (handles persistence)
+    segmentsList.onChange([]() {
+        rebuildSegmentViews();
+    });
+
+    // Load initial values from persisted properties
     currentLeds = ledCount.get();
+    currentAnimationShaderIndex = shaderIndex.get();
+
+    // Build initial segment views
+    rebuildSegmentViews();
 
     CallResult<void *> loadResult = reload();
     if (loadResult.hasError()) {
@@ -436,22 +510,28 @@ CallResult<void *> draw() {
     // Update atmospheric fade (reduce brightness gradually)
     updateAtmosphericFade();
 
-    if (currentAnimation == nullptr) {
+    if (currentAnimation == nullptr || animationErrored) {
         FastLED.clear(true);
     } else {
-        CallResult<void *> result = currentAnimation->apply(leds.data(), currentLeds);
+        CallResult<void *> result = currentAnimation->apply(
+            leds.data(), currentLeds,
+            segmentViews.data(), segmentViewCount,
+            &allLedsView);
 
         if (result.hasError()) {
+            shaderError.setString(result.getMessage().c_str());
+            animationErrored = true;
             return result;
         }
         FastLED.show();
     }
 
-    // Check for power saving (but skip during startup grace period)
+    // Check for power saving (skip during startup, active errors, or active clients)
     uint32_t currentTime = millis();
     bool inGracePeriod = (currentTime - startupTime) < STARTUP_GRACE_PERIOD;
+    bool hasError = shaderError.count() > 0;
 
-    if (areAllLedsBlack()) {
+    if (areAllLedsBlack() && !hasError) {
         if (lastNonBlackTime == 0) {
             lastNonBlackTime = currentTime;
         } else if (!inGracePeriod && (currentTime - lastNonBlackTime > POWER_SAVE_TIMEOUT)) {
@@ -537,5 +617,11 @@ void disableAtmosphericFade() {
 bool isAtmosphericFadeEnabled() {
     return atmosphericFadeEnabled;
 }
+
+uint8_t getColor() { return paramColor.get(); }
+float getSpeed() { return paramSpeed.get(); }
+const SegmentView* getSegmentViews() { return segmentViews.data(); }
+uint8_t getSegmentViewCount() { return segmentViewCount; }
+CRGB* getLeds() { return leds.data(); }
 
 }  // namespace Anime

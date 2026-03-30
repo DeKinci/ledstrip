@@ -41,8 +41,8 @@ template<typename T> struct TypeIdOf { static constexpr uint8_t value = TYPE_OBJ
 template<> struct TypeIdOf<bool> { static constexpr uint8_t value = TYPE_BOOL; };
 template<> struct TypeIdOf<uint8_t> { static constexpr uint8_t value = TYPE_UINT8; };
 template<> struct TypeIdOf<int8_t> { static constexpr uint8_t value = TYPE_INT8; };
-template<> struct TypeIdOf<uint16_t> { static constexpr uint8_t value = TYPE_INT32; };  // No TYPE_UINT16 in spec
-template<> struct TypeIdOf<int16_t> { static constexpr uint8_t value = TYPE_INT32; };   // No TYPE_INT16 in spec
+template<> struct TypeIdOf<uint16_t> { static constexpr uint8_t value = TYPE_UINT16; };
+template<> struct TypeIdOf<int16_t> { static constexpr uint8_t value = TYPE_INT16; };
 template<> struct TypeIdOf<uint32_t> { static constexpr uint8_t value = TYPE_INT32; };  // No TYPE_UINT32 in spec
 template<> struct TypeIdOf<int32_t> { static constexpr uint8_t value = TYPE_INT32; };
 template<> struct TypeIdOf<float> { static constexpr uint8_t value = TYPE_FLOAT32; };
@@ -90,6 +90,10 @@ struct is_wire_safe_impl<std::array<T, N>> : is_wire_safe_impl<T> {};
 // Value<T> is wire-safe if T is wire-safe
 template<typename T>
 struct is_wire_safe_impl<Value<T>> : is_wire_safe_impl<T> {};
+
+// MicroVariant is wire-safe (fixed-size trivially copyable)
+template<size_t N>
+struct is_wire_safe_impl<MicroVariant<N>> : std::true_type {};
 
 // std::vector is NOT wire-safe (heap allocated)
 template<typename T>
@@ -236,10 +240,8 @@ public:
      * Assignment from struct value
      */
     ObjectProperty& operator=(const T& value) {
-        if (!readonly) {
-            _data = value;
-            notifyChange();
-        }
+        _data = value;
+        notifyChange();
         return *this;
     }
 

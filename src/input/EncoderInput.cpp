@@ -1,3 +1,5 @@
+#ifdef ENCODER_ENABLED
+
 #include "EncoderInput.hpp"
 #include "animations/Anime.h"
 #include <Logger.h>
@@ -135,3 +137,5 @@ void loop() {
 }
 
 }  // namespace EncoderInput
+
+#endif // ENCODER_ENABLED

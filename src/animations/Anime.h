@@ -6,6 +6,7 @@
 #include <array>
 
 #include "LuaAnimation.h"
+#include "LedSegment.h"
 
 #define CACHE_SIZE 1
 
@@ -39,6 +40,14 @@ namespace Anime
     void enableAtmosphericFade();   // Enable gradual brightness reduction (kerosene lamp effect)
     void disableAtmosphericFade();  // Disable atmospheric fade
     bool isAtmosphericFadeEnabled(); // Check if atmospheric fade is active
+
+    uint8_t getColor();
+    float getSpeed();
+
+    // Segment mapping
+    const SegmentView* getSegmentViews();
+    uint8_t getSegmentViewCount();
+    CRGB* getLeds();
 };
 
 #endif // GARLAND_ANIMATION_MANAGER

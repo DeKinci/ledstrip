@@ -6,4 +6,7 @@
 index.htm original
 ble.htm original
 microproto-client.js original
+microproto-ui.js original
+microproto-ui.js original
 proto.htm original
+mic.htm original

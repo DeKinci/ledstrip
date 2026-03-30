@@ -14,75 +14,116 @@ A binary property-based protocol for embedded systems. Properties are typed valu
 
 ```
 lib/microproto/
+├── MicroProtoController.h/.cpp  # Protocol engine (transport-agnostic)
 ├── Property.h              # Property<T> - single values
 ├── ArrayProperty.h         # ArrayProperty<T,N> - fixed-size arrays
 ├── ListProperty.h          # ListProperty<T,N> - variable-size lists
+├── ObjectProperty.h        # ObjectProperty<T> - struct properties
+├── VariantProperty.h       # VariantProperty + MicroVariant<N> nestable type
+├── ResourceProperty.h      # ResourceProperty - header/body split (large data)
 ├── PropertyBase.h/.cpp     # Base class, registry, UI hints, constraints
 ├── PropertySystem.h/.cpp   # DirtySet, flush callbacks, change dispatch
-├── PropertyStorage.h/.cpp  # NVS persistence
-├── TypeTraits.h            # Type IDs and size traits
-├── Logger.h                # Logging macros
+├── PropertyStorage.h/.cpp  # NVS persistence (name-based FNV hash keys)
+├── TypeTraits.h            # Type IDs and size traits (incl. INT16/UINT16)
+├── Reflect.h               # Compile-time struct reflection + field names
 │
 ├── wire/                   # Binary encoding
 │   ├── Buffer.h            # ReadBuffer/WriteBuffer
-│   ├── OpCode.h            # Protocol opcodes
+│   ├── OpCode.h            # Protocol opcodes + flags
 │   ├── PropertyUpdate.h    # Property value encoding
-│   └── TypeCodec.h/.cpp    # Type-specific encode/decode
+│   └── TypeCodec.h/.cpp    # Type-specific encode/decode (incl. OBJECT elements)
 │
 ├── messages/               # Protocol messages
-│   ├── Hello.h             # Handshake message
+│   ├── Hello.h             # Handshake (incl. idle flag for gateway)
 │   ├── Error.h             # Error codes and messages
 │   ├── Schema.h/.cpp       # Schema serialization
-│   └── MessageRouter.h/.cpp # Opcode dispatch
+│   └── MessageRouter.h/.cpp # Opcode dispatch → MessageHandler interface
 │
-└── transport/              # Network layer
-    └── MicroProtoServer.h/.cpp  # WebSocket server (coupled)
+└── transport/              # Transport layer (thin wrappers)
+    ├── MicroProtoTransport.h    # Abstract transport interface
+    ├── MicroProtoServer.h/.cpp  # WebSocket transport
+    ├── MicroProtoBleServer.h/.cpp # BLE transport (fragmentation, reassembly)
+    └── BleFragmentation.h       # BLE fragment/reassemble helpers
 ```
 
 ## Key Classes
 
+### MicroProtoController (MicroProtoController.h)
+- **Protocol engine** — all protocol logic lives here, transport-agnostic
+- Implements `MessageHandler`: onHello, onPropertyUpdate, onResourceGet/Put/Delete, onRpc, onPing
+- Implements `FlushListener`: broadcasts dirty properties to all ready clients
+- Manages multiple transports via `registerTransport()`
+- Routes messages to correct transport via global client IDs
+
+### MicroProtoTransport (transport/MicroProtoTransport.h)
+- Abstract interface: `send()`, `maxClients()`, `isClientConnected()`, `maxPacketSize()`, `capabilities()`
+- Implemented by: WebSocket (MicroProtoServer), BLE (MicroProtoBleServer), Gateway (GatewayTransport)
+- BLE transport returns `capabilities().requiresBleExposed = true` for property filtering
+
 ### PropertyBase (PropertyBase.h)
 - Abstract base for all properties
-- Maintains static registry of all properties (`_registry`)
-- Provides type-erased interface: `encodeValue()`, `decodeValue()`, `encodeSchema()`
-- Contains UI hints: `Widget`, `UIColor`, min/max constraints
+- Static registry: `byId[]` array (max 256)
+- UI hints: Widget types (per-property-type), UIColor, min/max constraints
+- Named constants: `PB::PERSISTENT`, `PB::READONLY`, `PB::HIDDEN`
+- `readonly` blocks `setData()` (client writes) but NOT internal mutation methods
 
-### Property<T> (Property.h)
-- Template for single-value properties
-- Example: `Property<uint8_t> brightness{0, "brightness", 0, 255}`
-- Tracks dirty state, calls change callbacks
+### Property Types
+- `Property<T>` — single values (bool, uint8_t, int8_t, int16_t, uint16_t, int32_t, float)
+- `ArrayProperty<T,N>` — fixed-size arrays
+- `ListProperty<T,N>` — variable-size lists (supports OBJECT elements)
+- `ObjectProperty<T>` — structs with `MICROPROTO_FIELD_NAMES` for named fields
+- `VariantProperty<N,M>` — tagged unions; `MicroVariant<N>` for nestable variant values
+- `ResourceProperty<N,M>` — header/body split for large data (shaders)
 
 ### PropertySystem (PropertySystem.h)
-- `DirtySet` - bitset tracking which properties changed
-- `PropertySystem::onFlush()` - register callback for dirty properties
-- Debounced NVS persistence (5 second delay after changes)
-
-### MicroProtoServer (transport/MicroProtoServer.h)
-- WebSocket server handling protocol
-- **Currently couples transport + protocol logic** (to be separated)
-- Handles HELLO handshake, schema sync, value updates, broadcasting
+- `DirtySet` — bitset tracking which properties changed
+- `FlushListener` — interface for broadcast callbacks (controller is sole listener)
+- Debounced NVS persistence
 
 ### MessageRouter (messages/MessageRouter.h)
-- Dispatches incoming messages by opcode
-- Calls registered handlers: `MessageHandler::onHello()`, `onPropertyUpdate()`, etc.
+- Dispatches incoming binary messages by opcode
+- Calls `MessageHandler` methods (implemented by MicroProtoController)
 
 ## Protocol Flow
 
-1. Client connects via WebSocket
-2. Server sends HELLO with version + property count
-3. Client responds with HELLO (capabilities)
-4. Server sends SCHEMA_UPSERT for each property
-5. Server sends PROPERTY_UPDATE for each property value
+1. Client connects via transport (WebSocket, BLE, or Gateway)
+2. Client sends HELLO (with optional idle flag for gateway registration)
+3. Controller responds with HELLO + schema version
+4. Controller sends SCHEMA_UPSERT (batched, skipped if schema version matches)
+5. Controller sends PROPERTY_UPDATE (batched, all current values)
 6. Bidirectional updates flow as properties change
+7. Gateway: idle HELLO deactivates client (stops broadcasts)
 
 ## Important Patterns
 
 ### Creating Properties
 ```cpp
-// In header
-Property<uint8_t> brightness{0, "brightness", 0, 255};  // id, name, min, max
-Property<String> mode{"default", "mode"};
-ArrayProperty<uint8_t, 3> color{{255,255,255}, "color"}; // RGB
+using PB = MicroProto::PropertyBase;
+
+// Simple property with constraints and UI hints
+MicroProto::Property<uint8_t> brightness("brightness", 255, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<uint8_t>().min(0).max(255),
+    "LED brightness",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::AMBER).setIcon("💡").setUnit("%"),
+    PB::PERSISTENT);
+
+// Float with widget
+MicroProto::Property<float> speed("speed", 1.0f, MicroProto::PropertyLevel::LOCAL,
+    MicroProto::Constraints<float>().min(0.0f).max(2.0f).step(0.01f),
+    "Speed multiplier",
+    MicroProto::UIHints().setColor(MicroProto::UIColor::SKY).setWidget(MicroProto::Widget::Decimal::SLIDER),
+    PB::PERSISTENT);
+
+// Readonly hidden list (device writes, client reads)
+MicroProto::ListProperty<uint8_t, 600> ledPreview("ledPreview", {},
+    MicroProto::PropertyLevel::LOCAL,
+    "Live LED RGB", MicroProto::UIHints(),
+    PB::NOT_PERSISTENT, PB::READONLY, PB::HIDDEN);
+
+// LIST of OBJECT with field names
+struct SegmentData { std::array<uint8_t, 8> name; uint16_t ledCount; int16_t x, y; ... };
+MICROPROTO_FIELD_NAMES(SegmentData, "name", "ledCount", "x", "y", ...);
+MicroProto::ListProperty<SegmentData, 12> segments("segments", ...);
 ```
 
 ### Dirty Tracking
@@ -137,12 +178,10 @@ brightness.onChange([](uint8_t newValue) {
 
 See [todo.md](todo.md) for future considerations.
 
-## Current Limitations (Prototype Code)
+## Current Limitations
 
-1. **Transport coupling** - MicroProtoServer mixes WebSocket code with protocol logic
-2. **No JSON encoding** - Only binary format supported
-3. **No resources** - Only small properties, no blob/file support
-4. **Single transport** - WebSocket only, no HTTP REST or BLE
-5. **Property ID is uint8_t** - Spec allows propid (0-32767), code limited to 256
-
-See [Implementation.md](Implementation.md) for target architecture addressing these.
+1. **No JSON encoding** — only binary format supported
+2. **Property ID is uint8_t** — spec allows propid (0-32767), code limited to 256
+3. **No HTTP REST transport** — properties only accessible via WebSocket/BLE
+4. **No delta updates** — PROPERTY_DELTA (opcode 0x2) reserved but not implemented
+5. **No GROUP/GLOBAL levels** — all properties are LOCAL (no cross-device sync yet)

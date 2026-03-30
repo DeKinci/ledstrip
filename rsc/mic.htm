@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html><head><title>Mic Debug</title>
+<style>
+body{font-family:sans-serif;max-width:700px;margin:20px auto;padding:0 10px}
+button{padding:6px 16px;margin:4px;cursor:pointer}
+canvas{display:block;margin-top:10px;border:1px solid #ccc}
+#info{margin-top:8px;font-size:13px;color:#666}
+</style>
+</head><body>
+<h2>Mic Debug</h2>
+<div>
+  <button id="btn">Connect</button>
+  <button id="rec" disabled>Record</button>
+  <button id="dl" disabled>Download WAV</button>
+  <span id="status">Disconnected</span>
+</div>
+<canvas id="viz" width="680" height="200"></canvas>
+<div id="info"></div>
+<script>
+const btn=document.getElementById('btn'),
+      rec=document.getElementById('rec'),
+      dl=document.getElementById('dl'),
+      st=document.getElementById('status'),
+      info=document.getElementById('info'),
+      canvas=document.getElementById('viz'),
+      ctx=canvas.getContext('2d');
+
+let ws, actx, sampleRate=16000;
+let recording=false, recordChunks=[];
+let nextPlayTime=0;
+
+btn.onclick=()=>{
+  if(ws){ws.close();return;}
+  // Create AudioContext here, inside click handler (user gesture required)
+  if(!actx){
+    actx=new AudioContext({sampleRate});
+  }
+  actx.resume();
+  nextPlayTime=0;
+  ws=new WebSocket('ws://'+location.hostname+':82');
+  ws.binaryType='arraybuffer';
+  btn.textContent='Disconnect';
+  st.textContent='Connecting...';
+  ws.onopen=()=>{
+    st.textContent='Connected';
+    rec.disabled=false;
+  };
+  ws.onmessage=(e)=>{
+    if(typeof e.data==='string'){
+      sampleRate=parseInt(e.data);
+      info.textContent='Sample rate: '+sampleRate+'Hz';
+      return;
+    }
+    const i16=new Int16Array(e.data);
+
+    if(recording) recordChunks.push(new Int16Array(i16));
+
+    // Play — schedule buffers back-to-back to avoid gaps
+    const f32=new Float32Array(i16.length);
+    for(let i=0;i<i16.length;i++) f32[i]=i16[i]/32768.0;
+    const ab=actx.createBuffer(1,f32.length,sampleRate);
+    ab.getChannelData(0).set(f32);
+    const src=actx.createBufferSource();
+    src.buffer=ab;
+    src.connect(actx.destination);
+    const now=actx.currentTime;
+    if(nextPlayTime<now) nextPlayTime=now;
+    src.start(nextPlayTime);
+    nextPlayTime+=ab.duration;
+
+    drawWave(i16);
+  };
+  ws.onclose=()=>{
+    st.textContent='Disconnected';
+    btn.textContent='Connect';
+    rec.disabled=true;
+    ws=null;
+    nextPlayTime=0;
+  };
+};
+
+rec.onclick=()=>{
+  if(!recording){
+    recording=true;
+    recordChunks=[];
+    rec.textContent='Stop Rec';
+    dl.disabled=true;
+    st.textContent='Recording...';
+  } else {
+    recording=false;
+    rec.textContent='Record';
+    dl.disabled=false;
+    st.textContent='Recorded '+recordChunks.length+' chunks';
+  }
+};
+
+dl.onclick=()=>{
+  if(!recordChunks.length) return;
+  let total=0;
+  for(const c of recordChunks) total+=c.length;
+  const pcm=new Int16Array(total);
+  let off=0;
+  for(const c of recordChunks){pcm.set(c,off);off+=c.length;}
+  const wav=buildWav(pcm,sampleRate);
+  const blob=new Blob([wav],{type:'audio/wav'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download='mic_debug.wav';
+  a.click();
+  URL.revokeObjectURL(a.href);
+};
+
+function buildWav(samples,sr){
+  const numCh=1,bps=16;
+  const byteRate=sr*numCh*(bps/8);
+  const blockAlign=numCh*(bps/8);
+  const dataSize=samples.length*2;
+  const buf=new ArrayBuffer(44+dataSize);
+  const v=new DataView(buf);
+  const w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i));};
+  w(0,'RIFF');v.setUint32(4,36+dataSize,true);w(8,'WAVE');w(12,'fmt ');
+  v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,numCh,true);
+  v.setUint32(24,sr,true);v.setUint32(28,byteRate,true);
+  v.setUint16(32,blockAlign,true);v.setUint16(34,bps,true);
+  w(36,'data');v.setUint32(40,dataSize,true);
+  new Int16Array(buf,44).set(samples);
+  return buf;
+}
+
+function drawWave(i16){
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,680,200);
+  ctx.strokeStyle='#333';ctx.beginPath();
+  let mx=1;
+  for(let i=0;i<i16.length;i++){const a=Math.abs(i16[i]);if(a>mx)mx=a;}
+  for(let i=0;i<i16.length;i++){
+    const x=i/i16.length*680, y=100-(i16[i]/mx)*90;
+    i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+  }
+  ctx.stroke();
+  info.textContent='Samples: '+i16.length+' | Max: '+mx+' | Min: '+Math.min(...i16)+' | SR: '+sampleRate;
+}
+</script>
+</body></html>

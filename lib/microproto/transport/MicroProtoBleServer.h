@@ -4,40 +4,41 @@
 #include <NimBLEDevice.h>
 #include <array>
 #include <atomic>
-#include "../wire/Buffer.h"
-#include "../wire/OpCode.h"
-#include "../wire/PropertyUpdate.h"
-#include "../messages/Hello.h"
-#include "../messages/Error.h"
-#include "../messages/Schema.h"
-#include "../messages/MessageRouter.h"
-#include "../PropertyBase.h"
-#include "../PropertySystem.h"
+#include "MicroProtoTransport.h"
+#include "BleFragmentation.h"
+
+// Forward declare
+namespace MicroProto { class MicroProtoController; }
 
 namespace MicroProto {
 
-class MicroProtoBleServer : public MessageHandler,
-                            public FlushListener,
+/**
+ * BLE transport for MicroProto.
+ * Handles NimBLE GATT, fragmentation/reassembly, cross-task safety.
+ * All protocol logic lives in MicroProtoController.
+ */
+class MicroProtoBleServer : public MicroProtoTransport,
                             public NimBLEServerCallbacks,
                             public NimBLECharacteristicCallbacks {
 public:
-    static constexpr size_t TX_BUFFER_SIZE = 512;
-    static constexpr size_t MAX_CLIENTS = 3;
-    static constexpr uint32_t BROADCAST_INTERVAL_MS = 67;  // ~15 Hz
+    static constexpr uint8_t MAX_CLIENTS = 3;
     static constexpr size_t RX_QUEUE_SIZE = 4;
+    static constexpr uint8_t RX_BACKPRESSURE_RETRIES = 10;
+    static constexpr size_t REASSEMBLY_SIZE = 4096;
 
-    MicroProtoBleServer() : _router(this), _nextSessionId(1) {}
-
-    void begin();
+    void begin(MicroProtoController* controller);
     void loop();
     uint8_t connectedClients();
 
-    // MessageHandler interface
-    void onHello(uint8_t clientId, const Hello& hello) override;
-    void onPropertyUpdate(uint8_t clientId, uint16_t propertyId, const void* value, size_t size) override;
-    void onError(uint8_t clientId, const ErrorMessage& error) override;
-    void onPing(uint8_t clientId, bool isResponse, uint32_t payload) override;
-    void onConstraintViolation(uint8_t clientId, uint16_t propertyId, ErrorCode code) override;
+    // MicroProtoTransport interface
+    void send(uint8_t localClientId, const uint8_t* data, size_t len) override;
+    uint8_t maxClients() const override { return MAX_CLIENTS; }
+    bool isClientConnected(uint8_t localClientId) const override;
+    uint32_t maxPacketSize(uint8_t localClientId) const override;
+
+    Capabilities capabilities() const override {
+        return { .requiresBleExposed = true };
+    }
 
     // NimBLEServerCallbacks
     void onConnect(NimBLEServer* server, NimBLEConnInfo& connInfo) override;
@@ -48,8 +49,8 @@ public:
     void onWrite(NimBLECharacteristic* characteristic, NimBLEConnInfo& connInfo) override;
 
 private:
-    MessageRouter _router;
-    uint32_t _nextSessionId;
+    MicroProtoController* _controller = nullptr;
+    uint8_t _clientIdOffset = 0;
 
     NimBLEServer* _server = nullptr;
     NimBLECharacteristic* _txChar = nullptr;
@@ -57,41 +58,27 @@ private:
 
     struct BleClient {
         uint16_t connHandle = 0;
-        uint16_t mtu = 23;  // BLE default MTU
+        uint16_t mtu = 23;
         bool ready = false;
         bool valid = false;
+        std::atomic<bool> messageReady{false};
+        BleReassembler<REASSEMBLY_SIZE> reassembler;
     };
     std::array<BleClient, MAX_CLIENTS> _clients = {};
 
-    struct QueuedMessage {
-        uint8_t data[TX_BUFFER_SIZE];
-        size_t length = 0;
-        uint8_t clientId = 0;
-        bool valid = false;
-    };
-    std::array<QueuedMessage, RX_QUEUE_SIZE> _rxQueue = {};
+    struct RxSignal { uint8_t clientId = 0; };
+    std::array<RxSignal, RX_QUEUE_SIZE> _rxQueue = {};
+    portMUX_TYPE _clientsMux = portMUX_INITIALIZER_UNLOCKED;
     std::atomic<uint8_t> _rxHead{0};
     std::atomic<uint8_t> _rxTail{0};
-
-    DirtySet _pendingBroadcast;
-    uint32_t _lastBroadcastTime = 0;
+    std::atomic<uint8_t> _connCount{0};
 
     uint8_t findClientSlot(uint16_t connHandle);
     uint8_t allocClientSlot(uint16_t connHandle);
     void freeClientSlot(uint16_t connHandle);
-
-    uint16_t maxPayload(uint8_t clientIdx) const;
+    uint16_t maxPayloadForClient(uint8_t clientIdx) const;
     void sendToClient(uint8_t clientIdx, const uint8_t* data, size_t length);
-    void sendHelloResponse(uint8_t clientIdx);
-    void sendSchema(uint8_t clientIdx);
-    void sendAllPropertyValues(uint8_t clientIdx);
-    void sendError(uint8_t clientIdx, const ErrorMessage& error);
-    void sendPong(uint8_t clientIdx, uint32_t payload);
-    void broadcastPropertyExcept(const PropertyBase* prop, uint8_t excludeClient);
-
     void processRxQueue();
-    void onPropertiesChanged(const DirtySet& dirty) override;
-    void flushBroadcasts();
     void startAdvertising();
     bool _advertisingConfigured = false;
 };

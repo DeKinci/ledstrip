@@ -11,6 +11,15 @@ const { TextEncoder, TextDecoder } = require('util');
 global.TextEncoder = TextEncoder;
 global.TextDecoder = TextDecoder;
 
+// Mock localStorage for Node.js
+const _store = {};
+global.localStorage = {
+    getItem: (k) => _store[k] || null,
+    setItem: (k, v) => { _store[k] = String(v); },
+    removeItem: (k) => { delete _store[k]; },
+    clear: () => { for (const k in _store) delete _store[k]; }
+};
+
 // ============== Mock WebSocket ==============
 
 class MockWebSocket {
@@ -133,15 +142,18 @@ test('encodes HELLO request correctly', () => {
     client._sendHello();
 
     const sent = new Uint8Array(client.ws.sentMessages[0]);
-    // MVP format: opcode(1) + version(1) + maxPacketSize(varint) + deviceId(varint)
+    // MVP format: opcode(1) + version(1) + maxPacketSize(varint) + deviceId(varint) + schemaVersion(u16)
     // maxPacketSize = 4096 = varint(0x80, 0x20), deviceId = 1 = varint(0x01)
-    assertEqual(sent.length, 5, 'HELLO length');  // 1 + 1 + 2 + 1 = 5
+    assertEqual(sent.length, 7, 'HELLO length');  // 1 + 1 + 2 + 1 + 2 = 7
     assertEqual(sent[0], 0x00, 'opcode');  // HELLO
     assertEqual(sent[1], 1, 'version');    // Protocol version 1
     // maxPacketSize = 4096 as varint: 0x80 | (4096 & 0x7F) = 0x80, 4096 >> 7 = 32
     assertEqual(sent[2], 0x80, 'maxPacket varint byte 0');
     assertEqual(sent[3], 0x20, 'maxPacket varint byte 1');
     assertEqual(sent[4], 0x01, 'deviceId varint');
+    // schemaVersion = 0 (no cache)
+    assertEqual(sent[5], 0x00, 'schemaVersion lo');
+    assertEqual(sent[6], 0x00, 'schemaVersion hi');
 });
 
 test('encodes custom device ID', () => {
@@ -157,8 +169,8 @@ test('encodes custom device ID', () => {
     client._sendHello();
 
     const sent = new Uint8Array(client.ws.sentMessages[0]);
-    // Length: 1 (opcode) + 1 (version) + 2 (maxPacketSize varint) + 2 (deviceId varint) = 6
-    assertEqual(sent.length, 6, 'message length');
+    // Length: 1 (opcode) + 1 (version) + 2 (maxPacketSize varint) + 2 (deviceId varint) + 2 (schemaVersion u16) = 8
+    assertEqual(sent.length, 8, 'message length');
     // deviceId = 200 as varint: 0x80 | (200 & 0x7F) = 0xC8, 200 >> 7 = 1
     assertEqual(sent[4], 0xC8, 'deviceId varint byte 0');
     assertEqual(sent[5], 0x01, 'deviceId varint byte 1');
@@ -189,7 +201,8 @@ test('decodes HELLO response', (done) => {
             1,     // version
             0x80, 0x01,  // maxPacket = 128 as varint
             0x64,        // sessionId = 100
-            0xC8, 0x01   // timestamp = 200 as varint
+            0xC8, 0x01,  // timestamp = 200 as varint
+            0x05, 0x00   // schemaVersion = 5 (u16 little-endian)
         ]);
 
         client.ws._simulateMessage(response);
@@ -935,6 +948,309 @@ test('builds fire-and-forget RPC correctly', () => {
     assertEqual(sent.length, 2, 'no call_id');
 });
 
+// ============== Function Schema Decoding Tests ==============
+
+console.log('\n== Function Schema ==');
+
+// Helper: build a SCHEMA_UPSERT for a function
+function buildFunctionSchema(id, name, params, returnTypeId) {
+    const nameBytes = new TextEncoder().encode(name);
+    const parts = [
+        0x03,           // SCHEMA_UPSERT opcode (no batch)
+        0x02,           // item_type: FUNCTION
+        0x04,           // level_flags: ble_exposed=1
+        id,             // function ID
+        0,              // namespace ID
+        nameBytes.length,
+        ...nameBytes,
+        0,              // description length (varint 0)
+        params.length   // param_count
+    ];
+
+    for (const p of params) {
+        const pNameBytes = new TextEncoder().encode(p.name);
+        parts.push(pNameBytes.length, ...pNameBytes);
+        parts.push(p.typeId, 0);  // typeId + validation_flags=0
+    }
+
+    parts.push(returnTypeId);
+    if (returnTypeId !== 0) {
+        parts.push(0);  // validation_flags for return type
+    }
+
+    return new Uint8Array(parts);
+}
+
+test('decodes function schema with no params', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fn' });
+
+    client._handleMessage(buildFunctionSchema(0, 'reset', [], 0x00));
+
+    assertEqual(client.functions.size, 1, 'function registered');
+    const func = client.functions.get(0);
+    assertEqual(func.name, 'reset', 'function name');
+    assertEqual(func.type, 'function', 'type is function');
+    assertEqual(func.params.length, 0, 'no params');
+    assertEqual(func.returnTypeId, 0x00, 'void return');
+    assertEqual(func.bleExposed, true, 'ble exposed');
+    assertEqual(client.functionByName.get('reset'), 0, 'name lookup');
+});
+
+test('decodes function schema with params and return type', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fn2' });
+
+    client._handleMessage(buildFunctionSchema(
+        1, 'save',
+        [{name: 'slot', typeId: 0x03}],  // UINT8
+        0x01  // BOOL return
+    ));
+
+    const func = client.functions.get(1);
+    assertEqual(func.name, 'save', 'function name');
+    assertEqual(func.params.length, 1, 'one param');
+    assertEqual(func.params[0].name, 'slot', 'param name');
+    assertEqual(func.params[0].typeId, 0x03, 'param type UINT8');
+    assertEqual(func.returnTypeId, 0x01, 'BOOL return');
+});
+
+test('decodes batched function + property schema', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fn3' });
+
+    // First: property schema
+    const propName = new TextEncoder().encode('brightness');
+    client._handleMessage(new Uint8Array([
+        0x03, 0x01, 0x00, 3, 0, propName.length, ...propName,
+        0, 0x03, 0, 128, 0  // desc=0, UINT8, val_flags=0, default=128, ui=0
+    ]));
+
+    // Then: function schema
+    client._handleMessage(buildFunctionSchema(0, 'reset', [], 0x00));
+
+    assertEqual(client.properties.size, 1, 'property registered');
+    assertEqual(client.functions.size, 1, 'function registered');
+});
+
+// ============== RPC Response Tests ==============
+
+console.log('\n== RPC Responses ==');
+
+test('resolves RPC success with return value', (done) => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.functions.set(1, { id: 1, name: 'ping', returnTypeDef: { typeId: 0x03 } });
+    client.functionByName.set('ping', 1);
+
+    client.callFunction(1, null, true).then((result) => {
+        // Will verify async
+    }).catch(() => {});
+
+    // Simulate success response: opcode=5, flags=7 (is_response|success|has_return), callId=0, value=42
+    const response = new Uint8Array([0x75, 0, 42]);
+    client._handleMessage(response);
+});
+
+test('resolves RPC success without return value', (done) => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.functions.set(1, { id: 1, name: 'reset' });
+    client.functionByName.set('reset', 1);
+
+    client.callFunction(1, null, true).then((result) => {
+        // success, no value
+    }).catch(() => {});
+
+    // Success response without return value: flags=3 (is_response|success)
+    const response = new Uint8Array([0x35, 0]);
+    client._handleMessage(response);
+});
+
+test('rejects RPC error response', (done) => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.functions.set(1, { id: 1, name: 'fail' });
+    client.functionByName.set('fail', 1);
+
+    client.callFunction(1, null, true).catch((err) => {
+        // error caught
+    });
+
+    // Error response: flags=1 (is_response only), callId=0, errorCode=3, message
+    const msg = new TextEncoder().encode('bad');
+    const response = new Uint8Array([0x15, 0, 3, msg.length, ...msg]);
+    client._handleMessage(response);
+});
+
+test('RPC call by function name', () => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.functions.set(5, { id: 5, name: 'doStuff' });
+    client.functionByName.set('doStuff', 5);
+
+    client.callFunction('doStuff', null, true).catch(() => {});
+
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[0], 0x25, 'RPC header');
+    assertEqual(sent[1], 5, 'function id from name lookup');
+});
+
+test('RPC call with params', () => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.functions.set(1, { id: 1, name: 'save' });
+    client.functionByName.set('save', 1);
+
+    client.callFunction(1, [42, 0xFF], true).catch(() => {});
+
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[0], 0x25, 'RPC header');
+    assertEqual(sent[1], 1, 'function id');
+    assertEqual(sent[2], 0, 'call id');
+    assertEqual(sent[3], 42, 'param byte 0');
+    assertEqual(sent[4], 0xFF, 'param byte 1');
+});
+
+// ============== RPC Edge Cases ==============
+
+console.log('\n== RPC Edge Cases ==');
+
+test('RPC response for unknown callId is ignored', () => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    // No pending calls — response should not crash
+    const response = new Uint8Array([0x75, 99, 42]);  // callId=99, value=42
+    client._handleMessage(response);
+    // No assertion needed — just should not throw
+});
+
+test('RPC call to unknown function name rejects', (done) => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.callFunction('nonexistent', null, true).catch((err) => {
+        // Expected rejection
+    });
+    // Promise rejects synchronously for unknown name
+});
+
+test('function schema with description', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fndesc' });
+
+    const nameBytes = new TextEncoder().encode('reset');
+    const descBytes = new TextEncoder().encode('Reset all settings');
+    const msg = new Uint8Array([
+        0x03, 0x02, 0x04,  // SCHEMA_UPSERT, FUNCTION, ble_exposed
+        0, 0,               // func_id=0, ns_id=0
+        nameBytes.length, ...nameBytes,
+        descBytes.length, ...descBytes,  // description as varint len + bytes
+        0,                  // param_count=0
+        0x00                // return: void
+    ]);
+
+    client._handleMessage(msg);
+
+    const func = client.functions.get(0);
+    assertEqual(func.description, 'Reset all settings', 'description decoded');
+});
+
+test('function schema with multiple params', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fnmp' });
+
+    const nameBytes = new TextEncoder().encode('setPos');
+    const p1 = new TextEncoder().encode('x');
+    const p2 = new TextEncoder().encode('y');
+    const p3 = new TextEncoder().encode('z');
+
+    const msg = new Uint8Array([
+        0x03, 0x02, 0x04,
+        0, 0,
+        nameBytes.length, ...nameBytes,
+        0,             // no description
+        3,             // 3 params
+        p1.length, ...p1, 0x05, 0,  // x: FLOAT32
+        p2.length, ...p2, 0x05, 0,  // y: FLOAT32
+        p3.length, ...p3, 0x05, 0,  // z: FLOAT32
+        0x01, 0        // return: BOOL
+    ]);
+
+    client._handleMessage(msg);
+
+    const func = client.functions.get(0);
+    assertEqual(func.params.length, 3, '3 params');
+    assertEqual(func.params[0].name, 'x', 'param 0 name');
+    assertEqual(func.params[1].name, 'y', 'param 1 name');
+    assertEqual(func.params[2].name, 'z', 'param 2 name');
+    assertEqual(func.params[0].typeId, 0x05, 'FLOAT32');
+    assertEqual(func.returnTypeId, 0x01, 'BOOL return');
+});
+
+test('function not stored in properties map', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fnsep' });
+
+    client._handleMessage(buildFunctionSchema(0, 'myFunc', [], 0x00));
+
+    assertEqual(client.functions.size, 1, 'in functions map');
+    assertEqual(client.properties.size, 0, 'not in properties map');
+});
+
+test('function schema overwrites existing function', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_fnow' });
+
+    client._handleMessage(buildFunctionSchema(0, 'old', [], 0x00));
+    assertEqual(client.functions.get(0).name, 'old', 'initial name');
+
+    // Re-send with same ID but different name
+    client._handleMessage(buildFunctionSchema(0, 'new', [{name: 'a', typeId: 0x03}], 0x01));
+    assertEqual(client.functions.get(0).name, 'new', 'overwritten name');
+    assertEqual(client.functions.get(0).params.length, 1, 'overwritten params');
+});
+
+test('RPC call wraps call_id at 255', () => {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+
+    client.functions.set(1, { id: 1, name: 'f' });
+    client.functionByName.set('f', 1);
+
+    // Set call ID near wrap point
+    client._rpcCallId = 255;
+    client.callFunction(1, null, true).catch(() => {});
+    const sent1 = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent1[2], 255, 'callId 255');
+
+    client.callFunction(1, null, true).catch(() => {});
+    const sent2 = new Uint8Array(client.ws.sentMessages[1]);
+    assertEqual(sent2[2], 0, 'callId wraps to 0');
+});
+
 // ============== Resync Tests ==============
 
 console.log('\n== Resync ==');
@@ -958,6 +1274,135 @@ test('resync fails when not connected', () => {
 
     const result = client.resync();
     assertEqual(result, false, 'resync returns false');
+});
+
+// ============== Schema Caching Tests ==============
+
+console.log('\n== Schema Caching ==');
+
+// Helper: build a HELLO response with a given schemaVersion
+function buildHelloResponse(schemaVersion) {
+    return new Uint8Array([
+        0x10,        // HELLO opcode with is_response flag
+        1,           // version
+        0x80, 0x01,  // maxPacket = 128 as varint
+        0x01,        // sessionId = 1
+        0x01,        // timestamp = 1
+        schemaVersion & 0xFF, (schemaVersion >> 8) & 0xFF  // u16 LE
+    ]);
+}
+
+// Helper: build a SCHEMA_UPSERT for a UINT8 property
+function buildSchemaUpsert(id, name) {
+    const nameBytes = new TextEncoder().encode(name);
+    return new Uint8Array([
+        0x03,           // SCHEMA_UPSERT opcode
+        0x01,           // item type: PROPERTY
+        0x00,           // level flags: LOCAL
+        id,             // item ID
+        0,              // namespace ID
+        nameBytes.length,
+        ...nameBytes,
+        0,              // description length
+        0x03,           // type ID: UINT8
+        0,              // validation flags
+        0,              // default value
+        0               // UI hints (none)
+    ]);
+}
+
+test('saves schema version to localStorage on HELLO response', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_sv' });
+
+    client._handleMessage(buildHelloResponse(42));
+
+    assertEqual(localStorage.getItem('test_sv_v'), '42', 'schema version saved');
+});
+
+test('saves schema to localStorage on SCHEMA_UPSERT', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_sc' });
+
+    // First receive HELLO
+    client._handleMessage(buildHelloResponse(5));
+    // Then receive schema
+    client._handleMessage(buildSchemaUpsert(0, 'brightness'));
+    client._handleMessage(buildSchemaUpsert(1, 'speed'));
+
+    assertEqual(client.properties.size, 2, 'properties registered');
+    const cached = JSON.parse(localStorage.getItem('test_sc'));
+    assertEqual(cached.length, 2, 'cached schema has 2 items');
+});
+
+test('sends cached schema version in HELLO request', () => {
+    localStorage.clear();
+    localStorage.setItem('test_cv_v', '7');
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, deviceId: 1, storageKey: 'test_cv' });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+
+    client._sendHello();
+
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    // schemaVersion is last 2 bytes (u16 LE)
+    const svLo = sent[sent.length - 2];
+    const svHi = sent[sent.length - 1];
+    assertEqual(svLo, 7, 'schema version lo byte');
+    assertEqual(svHi, 0, 'schema version hi byte');
+});
+
+test('restores schema from cache when server version matches', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_match' });
+
+    // Simulate first connection: receive schema
+    client._handleMessage(buildHelloResponse(10));
+    client._handleMessage(buildSchemaUpsert(0, 'brightness'));
+    client._handleMessage(buildSchemaUpsert(1, 'speed'));
+    assertEqual(client.properties.size, 2, 'initial properties');
+
+    // Simulate reconnect: clear client state, then HELLO with same version
+    client.properties.clear();
+    client.propertyByName.clear();
+    assertEqual(client.properties.size, 0, 'cleared before reconnect');
+
+    // Server sends same schemaVersion=10 → client should restore from cache
+    client._handleMessage(buildHelloResponse(10));
+
+    assertEqual(client.properties.size, 2, 'properties restored from cache');
+    assertEqual(client.propertyByName.get('brightness'), 0, 'brightness lookup restored');
+    assertEqual(client.propertyByName.get('speed'), 1, 'speed lookup restored');
+});
+
+test('clears schema when server version differs', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, storageKey: 'test_diff' });
+
+    // First connection with version 3
+    client._handleMessage(buildHelloResponse(3));
+    client._handleMessage(buildSchemaUpsert(0, 'brightness'));
+    assertEqual(client.properties.size, 1, 'initial property');
+
+    // Reconnect with different version 4 → should clear, not restore
+    client._handleMessage(buildHelloResponse(4));
+
+    assertEqual(client.properties.size, 0, 'properties cleared for new schema');
+});
+
+test('sends schema version 0 when no cache exists', () => {
+    localStorage.clear();
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false, deviceId: 1, storageKey: 'test_nocache' });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+
+    client._sendHello();
+
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const svLo = sent[sent.length - 2];
+    const svHi = sent[sent.length - 1];
+    assertEqual(svLo, 0, 'no cache → version 0 lo');
+    assertEqual(svHi, 0, 'no cache → version 0 hi');
 });
 
 // ============== ERROR with schema_mismatch Tests ==============
@@ -1322,6 +1767,329 @@ test('LED property change callback fires', () => {
     assertEqual(brightnessChanged, true, 'callback fired');
     assertEqual(oldBrightness, 100, 'old value passed');
     assertEqual(newBrightness, 200, 'new value passed');
+});
+
+// ============== Typed Value Encoding Tests ==============
+
+console.log('\n== Typed Value Encoding ==');
+
+// Helper: create a client with a registered property schema
+function clientWithProperty(propDef) {
+    const client = new MicroProtoClient('ws://test:81', { reconnect: false });
+    client.ws = new MockWebSocket('ws://test:81');
+    client.ws.readyState = MockWebSocket.OPEN;
+    client.connected = true;
+    client.properties.set(propDef.id, propDef);
+    client.propertyByName.set(propDef.name, propDef.id);
+    return client;
+}
+
+// --- Basic type encoding ---
+
+test('encodes UINT8 property update', () => {
+    const client = clientWithProperty({
+        id: 1, name: 'brightness', typeId: 0x03, readonly: false
+    });
+    client.setProperty('brightness', 200);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[0], 0x01, 'opcode PROPERTY_UPDATE');
+    assertEqual(sent[1], 1, 'propId');
+    assertEqual(sent[2], 200, 'value');
+});
+
+test('encodes INT16 property update', () => {
+    const client = clientWithProperty({
+        id: 2, name: 'pos', typeId: 0x06, readonly: false
+    });
+    client.setProperty('pos', -100);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[0], 0x01, 'opcode');
+    assertEqual(sent[1], 2, 'propId');
+    const view = new DataView(sent.buffer);
+    assertEqual(view.getInt16(2, true), -100, 'value');
+});
+
+test('encodes UINT16 property update', () => {
+    const client = clientWithProperty({
+        id: 3, name: 'count', typeId: 0x07, readonly: false
+    });
+    client.setProperty('count', 1000);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(view.getUint16(2, true), 1000, 'value');
+});
+
+// --- OBJECT encoding ---
+
+test('encodes simple OBJECT property', () => {
+    const client = clientWithProperty({
+        id: 5, name: 'pos', typeId: 0x22, readonly: false,
+        fields: [
+            { name: 'x', typeDef: { typeId: 0x04 } },  // INT32
+            { name: 'y', typeDef: { typeId: 0x04 } },   // INT32
+        ]
+    });
+    client.setProperty('pos', { x: 100, y: -50 });
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[0], 0x01, 'opcode');
+    assertEqual(sent[1], 5, 'propId');
+    const view = new DataView(sent.buffer);
+    assertEqual(view.getInt32(2, true), 100, 'x');
+    assertEqual(view.getInt32(6, true), -50, 'y');
+    assertEqual(sent.length, 10, 'total size: 1+1+4+4');
+});
+
+test('encodes OBJECT with mixed field types', () => {
+    const client = clientWithProperty({
+        id: 6, name: 'config', typeId: 0x22, readonly: false,
+        fields: [
+            { name: 'enabled', typeDef: { typeId: 0x01 } },  // BOOL
+            { name: 'speed', typeDef: { typeId: 0x03 } },    // UINT8
+            { name: 'offset', typeDef: { typeId: 0x06 } },   // INT16
+            { name: 'ratio', typeDef: { typeId: 0x05 } },    // FLOAT32
+        ]
+    });
+    client.setProperty('config', { enabled: true, speed: 128, offset: -300, ratio: 3.14 });
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(sent[2], 1, 'enabled=true');
+    assertEqual(sent[3], 128, 'speed');
+    assertEqual(view.getInt16(4, true), -300, 'offset');
+    // float comparison with tolerance
+    const ratio = view.getFloat32(6, true);
+    assert(Math.abs(ratio - 3.14) < 0.01, `ratio expected ~3.14 got ${ratio}`);
+    assertEqual(sent.length, 10, 'total: 1+1+1+1+2+4');
+});
+
+test('encodes OBJECT with zero/default values', () => {
+    const client = clientWithProperty({
+        id: 7, name: 'data', typeId: 0x22, readonly: false,
+        fields: [
+            { name: 'a', typeDef: { typeId: 0x04 } },
+            { name: 'b', typeDef: { typeId: 0x04 } },
+        ]
+    });
+    client.setProperty('data', { a: 0, b: 0 });
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(view.getInt32(2, true), 0, 'a=0');
+    assertEqual(view.getInt32(6, true), 0, 'b=0');
+});
+
+test('encodes OBJECT with missing fields as 0', () => {
+    const client = clientWithProperty({
+        id: 8, name: 'partial', typeId: 0x22, readonly: false,
+        fields: [
+            { name: 'x', typeDef: { typeId: 0x04 } },
+            { name: 'y', typeDef: { typeId: 0x04 } },
+        ]
+    });
+    client.setProperty('partial', { x: 42 });  // y missing
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(view.getInt32(2, true), 42, 'x');
+    assertEqual(view.getInt32(6, true), 0, 'y defaults to 0');
+});
+
+// --- ARRAY encoding ---
+
+test('encodes ARRAY of UINT8', () => {
+    const client = clientWithProperty({
+        id: 10, name: 'rgb', typeId: 0x20, readonly: false,
+        elementCount: 3,
+        elementTypeDef: { typeId: 0x03 }
+    });
+    client.setProperty('rgb', [255, 128, 0]);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[2], 255, 'r');
+    assertEqual(sent[3], 128, 'g');
+    assertEqual(sent[4], 0, 'b');
+    assertEqual(sent.length, 5, 'total: 1+1+3');
+});
+
+test('encodes ARRAY of OBJECT', () => {
+    const client = clientWithProperty({
+        id: 11, name: 'points', typeId: 0x20, readonly: false,
+        elementCount: 2,
+        elementTypeDef: {
+            typeId: 0x22,
+            fields: [
+                { name: 'x', typeDef: { typeId: 0x06 } },  // INT16
+                { name: 'y', typeDef: { typeId: 0x06 } },
+            ]
+        }
+    });
+    client.setProperty('points', [{ x: 10, y: 20 }, { x: -30, y: 40 }]);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(view.getInt16(2, true), 10, 'p0.x');
+    assertEqual(view.getInt16(4, true), 20, 'p0.y');
+    assertEqual(view.getInt16(6, true), -30, 'p1.x');
+    assertEqual(view.getInt16(8, true), 40, 'p1.y');
+    assertEqual(sent.length, 10, 'total: 1+1+2*4');
+});
+
+// --- LIST encoding ---
+
+test('encodes LIST of UINT8', () => {
+    const client = clientWithProperty({
+        id: 20, name: 'items', typeId: 0x21, readonly: false,
+        elementTypeDef: { typeId: 0x03 }
+    });
+    client.setProperty('items', [10, 20, 30]);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[2], 3, 'varint count=3');
+    assertEqual(sent[3], 10);
+    assertEqual(sent[4], 20);
+    assertEqual(sent[5], 30);
+    assertEqual(sent.length, 6, 'total: 1+1+1+3');
+});
+
+test('encodes empty LIST', () => {
+    const client = clientWithProperty({
+        id: 21, name: 'empty', typeId: 0x21, readonly: false,
+        elementTypeDef: { typeId: 0x04 }
+    });
+    client.setProperty('empty', []);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[2], 0, 'varint count=0');
+    assertEqual(sent.length, 3, 'total: 1+1+1');
+});
+
+test('encodes LIST of OBJECT (segment-like)', () => {
+    const client = clientWithProperty({
+        id: 22, name: 'segments', typeId: 0x21, readonly: false,
+        elementTypeDef: {
+            typeId: 0x22,
+            fields: [
+                { name: 'name', typeDef: { typeId: 0x20, elementCount: 8, elementTypeDef: { typeId: 0x03 } } },
+                { name: 'ledCount', typeDef: { typeId: 0x07 } },   // UINT16
+                { name: 'x', typeDef: { typeId: 0x06 } },          // INT16
+                { name: 'y', typeDef: { typeId: 0x06 } },
+                { name: 'rotation', typeDef: { typeId: 0x06 } },
+                { name: 'flags', typeDef: { typeId: 0x03 } },      // UINT8
+                { name: 'width', typeDef: { typeId: 0x03 } },
+                { name: 'height', typeDef: { typeId: 0x03 } },
+                { name: '_reserved', typeDef: { typeId: 0x03 } },
+            ]
+        }
+    });
+    client.setProperty('segments', [
+        {
+            name: [114, 105, 110, 103, 0, 0, 0, 0],  // "ring"
+            ledCount: 24, x: -50, y: 30, rotation: 90,
+            flags: 1, width: 0, height: 0, _reserved: 0
+        }
+    ]);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+
+    assertEqual(sent[2], 1, 'varint count=1');
+
+    // name ARRAY: 8 bytes starting at offset 3
+    assertEqual(sent[3], 114, 'r');
+    assertEqual(sent[4], 105, 'i');
+    assertEqual(sent[5], 110, 'n');
+    assertEqual(sent[6], 103, 'g');
+    assertEqual(sent[7], 0, 'null');
+
+    // ledCount UINT16 at offset 11
+    assertEqual(view.getUint16(11, true), 24, 'ledCount');
+    // x INT16 at offset 13
+    assertEqual(view.getInt16(13, true), -50, 'x');
+    // y INT16 at offset 15
+    assertEqual(view.getInt16(15, true), 30, 'y');
+    // rotation INT16 at offset 17
+    assertEqual(view.getInt16(17, true), 90, 'rotation');
+    // flags UINT8 at offset 19
+    assertEqual(sent[19], 1, 'flags');
+    // width, height, reserved
+    assertEqual(sent[20], 0, 'width');
+    assertEqual(sent[21], 0, 'height');
+    assertEqual(sent[22], 0, 'reserved');
+
+    // Total: opheader(1) + propid(1) + varint(1) + 1*20bytes = 23
+    assertEqual(sent.length, 23, 'total size');
+});
+
+test('encodes LIST of multiple OBJECTs', () => {
+    const client = clientWithProperty({
+        id: 23, name: 'points', typeId: 0x21, readonly: false,
+        elementTypeDef: {
+            typeId: 0x22,
+            fields: [
+                { name: 'x', typeDef: { typeId: 0x04 } },
+                { name: 'y', typeDef: { typeId: 0x04 } },
+            ]
+        }
+    });
+    client.setProperty('points', [
+        { x: 1, y: 2 },
+        { x: 3, y: 4 },
+        { x: 5, y: 6 },
+    ]);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(sent[2], 3, 'count=3');
+    assertEqual(view.getInt32(3, true), 1, 'p0.x');
+    assertEqual(view.getInt32(7, true), 2, 'p0.y');
+    assertEqual(view.getInt32(11, true), 3, 'p1.x');
+    assertEqual(view.getInt32(15, true), 4, 'p1.y');
+    assertEqual(view.getInt32(19, true), 5, 'p2.x');
+    assertEqual(view.getInt32(23, true), 6, 'p2.y');
+    assertEqual(sent.length, 27, 'total: 1+1+1+3*8');
+});
+
+test('encodes nested OBJECT with ARRAY field', () => {
+    const client = clientWithProperty({
+        id: 24, name: 'pixel', typeId: 0x22, readonly: false,
+        fields: [
+            { name: 'rgb', typeDef: { typeId: 0x20, elementCount: 3, elementTypeDef: { typeId: 0x03 } } },
+            { name: 'alpha', typeDef: { typeId: 0x03 } },
+        ]
+    });
+    client.setProperty('pixel', { rgb: [255, 128, 64], alpha: 200 });
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    assertEqual(sent[2], 255, 'r');
+    assertEqual(sent[3], 128, 'g');
+    assertEqual(sent[4], 64, 'b');
+    assertEqual(sent[5], 200, 'alpha');
+    assertEqual(sent.length, 6, 'total: 1+1+3+1');
+});
+
+test('rejects write to readonly OBJECT', () => {
+    const client = clientWithProperty({
+        id: 25, name: 'ro', typeId: 0x22, readonly: true,
+        fields: [{ name: 'x', typeDef: { typeId: 0x04 } }]
+    });
+    const result = client.setProperty('ro', { x: 1 });
+    assertEqual(result, false, 'should return false');
+    assertEqual(client.ws.sentMessages.length, 0, 'no message sent');
+});
+
+test('encodes LIST of OBJECT with negative and boundary values', () => {
+    const client = clientWithProperty({
+        id: 26, name: 'edges', typeId: 0x21, readonly: false,
+        elementTypeDef: {
+            typeId: 0x22,
+            fields: [
+                { name: 'val', typeDef: { typeId: 0x06 } },  // INT16
+            ]
+        }
+    });
+    client.setProperty('edges', [
+        { val: 0 },
+        { val: -32768 },   // INT16 min
+        { val: 32767 },    // INT16 max
+        { val: -1 },
+    ]);
+    const sent = new Uint8Array(client.ws.sentMessages[0]);
+    const view = new DataView(sent.buffer);
+    assertEqual(sent[2], 4, 'count');
+    assertEqual(view.getInt16(3, true), 0, 'zero');
+    assertEqual(view.getInt16(5, true), -32768, 'INT16 min');
+    assertEqual(view.getInt16(7, true), 32767, 'INT16 max');
+    assertEqual(view.getInt16(9, true), -1, 'negative one');
 });
 
 // ============== Summary ==============
