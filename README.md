@@ -1,47 +1,84 @@
-# LED Strip Controller
+# 🌈 LED Strip Controller
 
-A programmable LED controller built on ESP32 that treats LED animations like shader programs. Write animations in Lua, edit them live from a web browser, organize LEDs into named segments, and access everything remotely through a gateway.
+Animate your LEDs with programs. A tiny ESP32 runs your animations autonomously — no WiFi, no cloud, no phone needed. Power it from a battery and wear it. Or connect to WiFi for a web editor with live preview, add Bluetooth remotes, or go fully remote through a gateway.
 
-## How It Works
+## ✨ What You Get
 
-You write small Lua programs that run every frame and paint colors onto LED segments:
+**At its simplest**: an ESP32 and an LED strip. Flash your animations, power it up, it runs. No WiFi, no app, no configuration. Great for wearables, costumes, art pieces.
+
+**With WiFi**: open the web app from any browser. You get a code editor, live controls, and a real-time animation preview — no app install needed.
+
+**Write animations in a few lines:**
 
 ```lua
 function draw()
-    for i in ring do
-        ring[i] = hsv(e.clr + e.time * 100 * e.spd + i * 5, 1, e.lum)
+    for i in led do
+        led[i] = hsv(e.time * 100 + i * 5, 1, e.lum)
     end
 end
 ```
 
-The device serves a web UI where you can edit shaders, adjust parameters with sliders, arrange LED segments on a canvas, and see a live preview — all generated automatically from the properties the firmware declares. No hardcoded UI.
+This creates a flowing rainbow. `e.lum` is a brightness slider, `e.time` is a clock — the UI controls appear automatically. You can create multi-stage animations with transitions, use smooth randomness for organic effects, and see it all in real-time preview before it hits the LEDs.
 
-A Go gateway service lets you access devices remotely. The device connects outward to the gateway (no port forwarding needed), and the gateway proxies everything — including the auto-generated UI.
+**📱 Control from anything.** The same device works with:
+- Web browser (phone or desktop) over WiFi
+- Bluetooth LE remote controls and buttons
+- Remote access through the gateway from anywhere
+- Mobile apps (via MicroProto protocol)
+- Smart home integration (WIP)
 
-## What's Interesting
+**🔒 No cloud required.** Everything runs locally. WiFi is optional — useful for editing, but not needed to run animations. Add a gateway for remote access when you want it — the device connects outward, so no port forwarding.
 
-**Animations are code, not configuration.** Lua shaders run in a sandboxed VM with coroutine support, so you can write sequential multi-phase animations (`over`, `wait`, `frame`) without state machines. The editor runs on the device itself.
+## 💡 LED Segments
 
-**The UI is derived from the protocol.** The device declares typed properties with constraints and widget hints. The client renders appropriate controls — sliders, toggles, code editors, canvas layouts — purely from the schema. Adding a new property to the firmware automatically produces a new UI element.
+LEDs aren't always a straight line. You might have a ring, a matrix panel, or multiple strips arranged in a shape. The segment system lets you define named groups — a ring of 24 LEDs, a strip of 60, a 8x8 matrix — position them on a 2D canvas, and address them by name in your code:
 
-**One protocol, many transports.** MicroProto is a compact binary protocol with a single engine (`MicroProtoController`) that handles all the logic. WebSocket, BLE, and gateway connections are thin wrappers. The gateway doesn't parse protocol messages — it just activates the device when a user connects and forwards bytes.
+```lua
+function draw()
+    for i in ring do
+        ring[i] = hsv(e.clr + i * 15, 1, e.lum)
+    end
+    ring:blur(3)
 
-**LED segments are first-class objects.** You can define lines, rings, and matrices, position them in 2D, and address them by name in Lua. Each segment supports transforms like `blur`, `fade`, `shift`, `mirror`. The web canvas editor lets you drag and rotate them.
-
-**The widget library ships what you need.** TypeScript widgets are tree-shaken at build time. The device firmware embeds only the widgets it uses. The gateway embeds all of them. Same source code, different build profiles.
-
-## Project Layout
-
+    for i in strip do
+        strip[i] = hsv(e.time * 50 + i, 1, e.lum)
+    end
+end
 ```
-lib/microproto/        Protocol library (properties, schema, binary encoding, transports)
-src/                   ESP32 firmware (animations, Lua VM, segments, web server)
-widgets/               Shared TypeScript widget library
-web/                   Device-side widget build profile
-gateway/               Go gateway service (auth, device registry, WS proxy)
-test/                  Native C++ tests, JS client tests, integration tests
+
+Each segment supports transforms like `blur`, `fade`, `shift`, `mirror`. The web UI shows a drag-and-drop canvas editor where you can arrange, rotate, and resize segments, with live preview showing actual LED colors.
+
+## 🎛️ Optional Hardware
+
+The core is just an ESP32 and an LED strip. But you can add:
+- **Rotary encoder** — physical brightness/animation control
+- **Microphone** — audio-reactive animations using `e.volume`
+- **Buttons** — cycle through animations
+- **Bluetooth remotes** — pair BLE button devices for wireless control
+
+All optional peripherals are auto-detected via build flags. The firmware only includes what you enable.
+
+## 🧱 Built on Reusable Libraries
+
+This project isn't a monolith — it's built on a set of independent, reusable libraries:
+
+- **[MicroProto](lib/microproto/README.md)** — a binary property protocol for embedded systems. Devices declare typed properties with constraints and UI hints. Clients auto-generate UI from the schema. Supports WebSocket, BLE, and gateway transports through a single protocol engine. Works for any IoT device, not just LEDs.
+- **WebUtils** — minimal HTTP server and request routing for ESP32, no async framework overhead
+- **WiFiMan** — WiFi connection manager with captive portal, credential storage, and auto-reconnect
+
+## 🌍 Remote Gateway
+
+A Go service that lets you access your devices from anywhere. The device makes an outbound WebSocket connection to the gateway — no port forwarding, works behind any NAT.
+
+```bash
+cd gateway && go build ./cmd/gateway/ && ./gateway -addr :8080
 ```
 
-## Getting Started
+The gateway shows all your registered devices with online/offline status. Click a device to get the full UI — same controls, same editor, same live preview, just proxied through the gateway. When no one is watching, the device goes idle and stops sending data to save bandwidth.
+
+Multiple users can view the same device simultaneously. Authentication via device tokens.
+
+## 🚀 Getting Started
 
 ```bash
 # Build and upload firmware
@@ -50,29 +87,41 @@ pio run -e minic-v4 -t upload
 # Open web UI
 open http://led.local
 
-# Run gateway (optional, for remote access)
-cd gateway && go build ./cmd/gateway/ && ./gateway -addr :8080
+# Optional: run gateway for remote access
+cd gateway && go build ./cmd/gateway/ && ./gateway
 ```
 
 ## Board Configurations
 
-| Environment | Board | Notes |
-|-------------|-------|-------|
-| `minic-v4` | XIAO ESP32-S3 | Default, D10 LED pin |
-| `gaslamp` | XIAO ESP32-S3 | Encoder + mic input |
-| `xiao-ws2811` | XIAO ESP32-S3 | WS2811 strip |
-| `esp32-c3` | ESP32-C3 DevKit | Basic config |
+| Environment | Board | Features |
+|-------------|-------|----------|
+| `minic-v4` | XIAO ESP32-S3 | Default, compact form factor |
+| `gaslamp` | XIAO ESP32-S3 | Encoder + microphone |
+| `xiao-ws2811` | XIAO ESP32-S3 | WS2811 strip type |
+| `esp32-c3` | ESP32-C3 DevKit | Budget option |
 
-## Further Reading
+## Project Layout
+
+```
+lib/microproto/        MicroProto protocol library
+lib/webutils/          HTTP server and routing
+lib/wifiman/           WiFi manager with captive portal
+src/                   ESP32 firmware
+widgets/               TypeScript UI widget library (shared)
+gateway/               Go gateway service
+test/                  Native, JS, and integration tests
+```
+
+## Documentation
 
 - [MicroProto Protocol Spec](lib/microproto/README.md) — wire format, opcodes, type system
 - [MicroProto Developer Guide](lib/microproto/CLAUDE.md) — architecture and API reference
-- [BLE Transport](lib/microproto/transport/BLE.md) — BLE-specific details
+- [BLE Transport](lib/microproto/transport/BLE.md) — Bluetooth LE details
 
 ## Tests
 
 ```bash
 pio test -e native                          # C++ unit tests
 node test/js/microproto-client.test.js      # JS client tests
-python scripts/run_integration_tests.py     # Integration (needs device)
+python scripts/run_integration_tests.py     # Integration tests (needs device)
 ```
