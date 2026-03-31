@@ -8,8 +8,8 @@
   </component>
   <component name="CidrRootsConfiguration">
     <sourceRoots>
-      <file path="$PROJECT_DIR$/lib/MicroLog/src" />
       <file path="$PROJECT_DIR$/lib/lua-5.3.5/src" />
+      <file path="$PROJECT_DIR$/lib/microlog/src" />
     </sourceRoots>
     <excludeRoots>
       <file path="$PROJECT_DIR$/.cache" />
