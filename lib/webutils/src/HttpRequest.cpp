@@ -1,3 +1,4 @@
+#include <MicroLog.h>
 #include "HttpRequest.h"
 #include "UrlDecode.h"
 
@@ -139,7 +140,7 @@ void HttpRequest::parseQueryString(StringView queryString) {
     }
 
     if (pos < queryString.length() && _queryParamCount >= MAX_QUERY_PARAMS) {
-        Serial.printf("[HttpRequest] Warning: query param limit (%d) exceeded\n", MAX_QUERY_PARAMS);
+        LOG_WARN("HTTP", "Query param limit (%d) exceeded", MAX_QUERY_PARAMS);
     }
 }
 
@@ -333,7 +334,7 @@ bool HttpRequest::match(StringView method, StringView pattern) {
                 tempValues[tempCount] = _path.substr(pathPos, pathSegLen);
                 tempCount++;
             } else {
-                Serial.printf("[HttpRequest] Warning: path param limit (%d) exceeded\n", MAX_PATH_PARAMS);
+                LOG_WARN("HTTP", "Path param limit (%d) exceeded", MAX_PATH_PARAMS);
             }
         } else {
             // Literal segment - must match exactly

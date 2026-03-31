@@ -1,3 +1,4 @@
+#include <MicroLog.h>
 #include "ResourceStorage.h"
 
 #ifdef ARDUINO
@@ -15,12 +16,12 @@ bool ResourceStorage::init() {
     if (_initialized) return true;
 
     if (!SPIFFS.begin(true)) {  // Format on fail
-        Serial.println("[ResourceStorage] SPIFFS mount failed");
+        LOG_ERROR("Storage", "SPIFFS mount failed");
         return false;
     }
 
     _initialized = true;
-    Serial.println("[ResourceStorage] SPIFFS initialized");
+    LOG_INFO("Storage", "SPIFFS initialized");
     return true;
 #else
     _initialized = true;
@@ -47,7 +48,7 @@ bool ResourceStorage::writeBody(const char* propName, uint32_t resourceId,
 
     File file = SPIFFS.open(path, FILE_WRITE);
     if (!file) {
-        Serial.printf("[ResourceStorage] Failed to open %s for write\n", path);
+        LOG_ERROR("Storage", "Failed to open %s for write", path);
         return false;
     }
 
@@ -55,11 +56,11 @@ bool ResourceStorage::writeBody(const char* propName, uint32_t resourceId,
     file.close();
 
     if (written != len) {
-        Serial.printf("[ResourceStorage] Write failed: %zu/%zu bytes\n", written, len);
+        LOG_ERROR("Storage", "Write failed: %zu/%zu bytes", written, len);
         return false;
     }
 
-    Serial.printf("[ResourceStorage] Wrote %zu bytes to %s\n", len, path);
+    LOG_DEBUG("Storage", "Wrote %zu bytes to %s", len, path);
     return true;
 #else
     // Native test environment - no SPIFFS
@@ -81,7 +82,7 @@ size_t ResourceStorage::readBody(const char* propName, uint32_t resourceId,
 
     File file = SPIFFS.open(path, FILE_READ);
     if (!file) {
-        Serial.printf("[ResourceStorage] Failed to open %s for read\n", path);
+        LOG_ERROR("Storage", "Failed to open %s for read", path);
         return 0;
     }
 

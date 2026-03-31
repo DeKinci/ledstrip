@@ -1,3 +1,4 @@
+#include <MicroLog.h>
 #include "MicroProtoServer.h"
 #include "../MicroProtoController.h"
 #include <Arduino.h>
@@ -13,7 +14,7 @@ void MicroProtoServer::begin(MicroProtoController* controller) {
         handleEvent(num, type, payload, length);
     });
 
-    Serial.println("[MicroProto] WebSocket server started");
+    LOG_INFO("Proto", "WebSocket server started");
 }
 
 void MicroProtoServer::loop() {
@@ -45,7 +46,7 @@ void MicroProtoServer::handleEvent(uint8_t num, WStype_t type, uint8_t* payload,
             break;
 
         case WStype_TEXT:
-            Serial.printf("[MicroProto] Unexpected text from client %u\n", num);
+            LOG_WARN("Proto", "Unexpected text from client %u", num);
             break;
 
         default:

@@ -20,6 +20,7 @@
 #include "ble/BleDeviceManager.hpp"
 #include "gateway/GatewayClient.h"
 #include <MicroLog.h>
+#include <MicroLogProto.h>
 
 #include "gen/w_index_htm.h"
 #include "gen/w_proto_htm.h"
@@ -38,6 +39,13 @@ WiFiMan::WiFiManager wifiManager(&httpDispatcher);
 
 CallResult<void*> animeStatus(nullptr);
 
+// Metrics — auto-registered, printed every 10s
+#include <Gauge.h>
+static MicroLog::Gauge<uint32_t> mHeap("heap", "B", 5000);
+static MicroLog::Gauge<int32_t> mRSSI("rssi", "dBm", 5000);
+static MicroLog::Gauge<uint8_t> mWSClients("ws_clients", nullptr, 2000);
+static MicroLog::Gauge<uint8_t> mBLEClients("ble_clients", nullptr, 2000);
+
 void setup() {
     Serial.begin(115200);
     delay(600);  // crucial for wifi
@@ -53,7 +61,8 @@ void setup() {
     Serial.printf("2. After BLE init: Free heap: %lu bytes\n", ESP.getFreeHeap());
 
     // Initialize logging (boot counter, persistent error log)
-    MicroLog::MicroLog::init();
+    MicroLog::MicroLogProto::init();
+    MicroLog::Logger::setMetricsInterval(10000);
 
     // Initialize property system (includes loading persistent values)
     MicroProto::PropertySystem::init();
@@ -168,15 +177,10 @@ void loop() {
     animeStatus = Anime::draw();
     yield();
 
-    // Periodic status logging
-    static uint32_t lastStatusPrint = 0;
-    if (millis() - lastStatusPrint > 10000) {
-        lastStatusPrint = millis();
-        LOG_INFO("Main", "Free heap: %lu, RSSI: %d dBm, WS: %u, BLE: %u, WiFi: %s, Shaders: %u",
-                 ESP.getFreeHeap(), WiFi.RSSI(),
-                 protoServer.connectedClients(),
-                 protoBle.connectedClients(),
-                 wifiManager.getStateString().c_str(),
-                 Anime::getShaderCount());
-    }
+    // Update metrics (printed automatically by Logger::loop)
+    mHeap.set(ESP.getFreeHeap());
+    mRSSI.set(WiFi.RSSI());
+    mWSClients.set(protoServer.connectedClients());
+    mBLEClients.set(protoBle.connectedClients());
+    MicroLog::Logger::loop();
 }

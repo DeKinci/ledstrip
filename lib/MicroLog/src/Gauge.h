@@ -1,97 +1,96 @@
-#ifndef MICROLOG_GAUGE_H
-#define MICROLOG_GAUGE_H
+#pragma once
 
-#include <StreamProperty.h>
-#include <array>
+#include <cstdint>
+#include <cstdio>
+#include <type_traits>
 
 namespace MicroLog {
 
-/**
- * Sample<T> - Timestamped value for timeseries streams.
- */
-template<typename T>
-struct Sample {
-    uint32_t timestamp;
-    T value;
+// Type-erased metric base — used by Logger to print all metrics in one line
+class MetricBase {
+public:
+    MetricBase(const char* name, const char* unit);
+    virtual ~MetricBase() = default;
+    virtual int printValue(char* buf, size_t len) const = 0;
+    const char* name() const { return _name; }
+    const char* unit() const { return _unit; }
+protected:
+    const char* _name;
+    const char* _unit;
 };
 
-/**
- * Gauge<T> - A timeseries variable representing a current value that changes over time.
- *
- * Wraps a StreamProperty<Sample<T>, 0> with built-in debounce.
- * Only pushes a new sample when the value changes or the debounce interval elapses.
- * Client/gateway accumulates history for graphing.
- *
- * Usage:
- *   MicroLog::Gauge<float> freeHeap("diag/freeHeap", "KB");
- *
- *   void loop() {
- *       freeHeap.set(ESP.getFreeHeap() / 1024.0f);
- *   }
- */
+// Callback for when a metric value is pushed (used by microlog-up)
 template<typename T>
-class Gauge {
+using MetricCallback = void(*)(uint32_t timestamp, T value);
+
+template<typename T>
+class Gauge : public MetricBase {
 public:
-    using PB = MicroProto::PropertyBase;
+    Gauge(const char* name, const char* unit = nullptr, uint32_t debounceMs = 1000)
+        : MetricBase(name, unit), _debounceMs(debounceMs) {}
 
-    Gauge(
-        const char* name,
-        const char* unit = nullptr,
-        uint32_t debounceMs = 1000,
-        MicroProto::UIColor color = MicroProto::UIColor::CYAN
-    ) : _stream(
-            name,
-            MicroProto::PropertyLevel::LOCAL,
-            name, // description = name for gauges
-            MicroProto::UIHints()
-                .setColor(color)
-                .setWidget(MicroProto::Widget::Stream::TIMESERIES)
-                .setUnit(unit),
-            PB::NOT_PERSISTENT, PB::READONLY
-        ),
-        _debounceMs(debounceMs)
-    {
-    }
-
-    /**
-     * Set the current gauge value.
-     * Pushes a sample if value changed or debounce interval elapsed.
-     */
     void set(T value) {
 #ifdef ARDUINO
         uint32_t now = millis();
 #else
         uint32_t now = 0;
 #endif
-
         bool changed = !_hasValue || (_lastValue != value);
         bool elapsed = (now - _lastPushTime) >= _debounceMs;
-
         if (changed || elapsed) {
-            Sample<T> sample;
-            sample.timestamp = now;
-            sample.value = value;
-            _stream.push(sample);
             _lastValue = value;
             _lastPushTime = now;
             _hasValue = true;
+            if (_callback) _callback(now, value);
         }
     }
 
-    /** Get the last set value */
     T get() const { return _lastValue; }
+    void onPush(MetricCallback<T> cb) { _callback = cb; }
 
-    /** Access the underlying stream property */
-    auto& stream() { return _stream; }
+    int printValue(char* buf, size_t len) const override {
+        if (!_hasValue) return snprintf(buf, len, "%s=-", _name);
+        if constexpr (std::is_floating_point_v<T>)
+            return _unit ? snprintf(buf, len, "%s=%.1f%s", _name, (double)_lastValue, _unit)
+                         : snprintf(buf, len, "%s=%.1f", _name, (double)_lastValue);
+        else if constexpr (std::is_signed_v<T>)
+            return _unit ? snprintf(buf, len, "%s=%ld%s", _name, (long)_lastValue, _unit)
+                         : snprintf(buf, len, "%s=%ld", _name, (long)_lastValue);
+        else
+            return _unit ? snprintf(buf, len, "%s=%lu%s", _name, (unsigned long)_lastValue, _unit)
+                         : snprintf(buf, len, "%s=%lu", _name, (unsigned long)_lastValue);
+    }
 
 private:
-    MicroProto::StreamProperty<Sample<T>, 0> _stream;
     uint32_t _debounceMs;
     uint32_t _lastPushTime = 0;
     T _lastValue = {};
     bool _hasValue = false;
+    MetricCallback<T> _callback = nullptr;
+};
+
+template<typename T>
+class Counter : public MetricBase {
+public:
+    Counter(const char* name, const char* unit = nullptr)
+        : MetricBase(name, unit) {}
+
+    void increment(T delta = 1) { _total += delta; }
+    T get() const { return _total; }
+    void onPush(MetricCallback<T> cb) { _callback = cb; }
+
+    int printValue(char* buf, size_t len) const override {
+        if constexpr (std::is_signed_v<T>)
+            return _unit ? snprintf(buf, len, "%s=%ld%s", _name, (long)_total, _unit)
+                         : snprintf(buf, len, "%s=%ld", _name, (long)_total);
+        else
+            return _unit ? snprintf(buf, len, "%s=%lu%s", _name, (unsigned long)_total, _unit)
+                         : snprintf(buf, len, "%s=%lu", _name, (unsigned long)_total);
+    }
+
+private:
+    T _total = {};
+    MetricCallback<T> _callback = nullptr;
 };
 
 } // namespace MicroLog
-
-#endif // MICROLOG_GAUGE_H

@@ -1,3 +1,4 @@
+#include <MicroLog.h>
 #include "HttpDispatcher.h"
 #include <cstring>
 #include <BuildInfo.h>
@@ -25,7 +26,7 @@ void HttpDispatcher::sortIfNeeded() {
 HttpDispatcher::RouteHandle HttpDispatcher::addRoute(const char* method, const char* pattern,
                                                       Handler handler, int priority, const char* etag) {
     if (_warnOnCollision && checkCollision(method, pattern, priority)) {
-        Serial.printf("[HttpDispatcher] Warning: collision for %s %s (priority %d)\n",
+        LOG_WARN("HTTP", "Route collision for %s %s (priority %d)",
                       method, pattern, priority);
     }
 

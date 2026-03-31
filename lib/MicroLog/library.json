@@ -1,13 +1,6 @@
 {
-  "name": "MicroLog",
-  "version": "0.1.0",
-  "description": "Structured logging with MicroProto streaming, persistent ring buffer, and timeseries metrics",
-  "keywords": ["esp32", "logging", "telemetry", "metrics"],
-  "authors": [{"name": "SmartGarland"}],
-  "build": {
-    "srcDir": "src"
-  },
-  "dependencies": {
-    "MicroProto": "*"
-  }
+  "name": "microlog",
+  "version": "0.2.0",
+  "description": "Lightweight structured logging for ESP32",
+  "build": { "srcDir": "src" }
 }

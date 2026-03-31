@@ -56,6 +56,41 @@ class MyClass {
 };
 ```
 
+### Logging
+
+Use `microlog` (`LOG_INFO`, `LOG_WARN`, `LOG_ERROR`) for all output. Never use `Serial.print` directly in library code.
+
+```cpp
+#include <MicroLog.h>
+
+LOG_INFO("WiFi", "Connected to %s", ssid);
+LOG_WARN("Proto", "Unknown property ID %d", propId);
+LOG_ERROR("Storage", "Write failed: %zu bytes", len);
+LOG_DEBUG("BLE", "Scan result: %s", addr);  // Only in DEBUG builds
+```
+
+Metrics use `Gauge<T>` and `Counter<T>` — they auto-register and print periodically:
+
+```cpp
+#include <Gauge.h>
+
+static MicroLog::Gauge<uint32_t> mHeap("heap", "B", 5000);
+static MicroLog::Counter<uint32_t> mRequests("http_reqs");
+
+void loop() {
+    mHeap.set(ESP.getFreeHeap());
+    MicroLog::Logger::loop();  // Prints all metrics at configured interval
+}
+```
+
+Library composition:
+- `microlog` — Serial logging + metrics. Zero dependencies.
+- `microlog-up` — Adds MicroProto streaming. `MicroLogProto::init()` handles everything.
+
+### Non-Blocking Code
+
+Never block in `loop()`. ESP32 is single-threaded — blocking means WiFi, WebSocket, BLE, and other services stop. Use non-blocking state machines that return after each unit of work.
+
 ## Current Architecture
 
 Migrated from AsyncWebServer (poor performance) to **minimal synchronous WiFiServer + WebSockets**:

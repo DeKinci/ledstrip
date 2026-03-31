@@ -1,0 +1,10 @@
+{
+  "name": "microlog-up",
+  "version": "0.2.0",
+  "description": "MicroLog + MicroProto integration: log streaming, counters, gauges",
+  "build": { "srcDir": "src" },
+  "dependencies": {
+    "microlog": "*",
+    "MicroProto": "*"
+  }
+}

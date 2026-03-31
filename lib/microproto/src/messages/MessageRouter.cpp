@@ -1,3 +1,4 @@
+#include <MicroLog.h>
 #include "MessageRouter.h"
 #include <Arduino.h>
 
@@ -44,7 +45,7 @@ bool MessageRouter::process(uint8_t clientId, const uint8_t* data, size_t length
             return processResourceDelete(buf, flags);
 
         default:
-            Serial.printf("[MicroProto] Unknown opcode: 0x%02X\n", static_cast<uint8_t>(opcode));
+            LOG_WARN("Proto", "Unknown opcode: 0x%02X", static_cast<uint8_t>(opcode));
             return false;
     }
 }
@@ -80,7 +81,7 @@ bool MessageRouter::processPropertyUpdate(ReadBuffer& buf, uint8_t flags) {
         // Read property ID (propid encoding: 1-2 bytes)
         uint16_t propId = buf.readPropId();
         if (!buf.ok()) {
-            Serial.printf("[MicroProto] Buffer underflow reading property ID\n");
+            LOG_ERROR("Proto", "Buffer underflow reading property ID");
             return false;
         }
 
@@ -89,7 +90,7 @@ bool MessageRouter::processPropertyUpdate(ReadBuffer& buf, uint8_t flags) {
 
         PropertyBase* prop = findProperty(propId);
         if (!prop) {
-            Serial.printf("[MicroProto] Unknown property ID %d in update\n", propId);
+            LOG_WARN("Proto", "Unknown property ID %d in update", propId);
             return false;
         }
 
@@ -99,7 +100,7 @@ bool MessageRouter::processPropertyUpdate(ReadBuffer& buf, uint8_t flags) {
         size_t decodedSize = 0;
 
         if (!TypeCodec::decodeInto(buf, prop, tempBuf, sizeof(tempBuf), decodedSize)) {
-            Serial.printf("[MicroProto] Failed to decode value for property %d\n", propId);
+            LOG_ERROR("Proto", "Failed to decode value for property %d", propId);
             return false;
         }
 
