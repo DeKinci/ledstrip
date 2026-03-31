@@ -10,7 +10,7 @@ import * as path from 'path'
 import * as fs from 'fs'
 import { ROOT } from './paths.js'
 
-const rscGen = path.join(ROOT, 'lib/microproto-web/rsc_gen')
+const rscGen = path.join(ROOT, 'lib/microproto-web/rsc/gen')
 const gatewayStatic = path.join(ROOT, 'service/gateway/internal/web/static')
 
 fs.mkdirSync(rscGen, { recursive: true })

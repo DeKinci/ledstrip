@@ -5,6 +5,7 @@ HttpServer::HttpServer(uint16_t port)
     , _dispatcher(httpDispatcher)
     , _port(port)
 {
+    registerDefaults();
 }
 
 HttpServer::HttpServer(uint16_t port, HttpDispatcher& dispatcher)
@@ -12,6 +13,14 @@ HttpServer::HttpServer(uint16_t port, HttpDispatcher& dispatcher)
     , _dispatcher(dispatcher)
     , _port(port)
 {
+    registerDefaults();
+}
+
+void HttpServer::registerDefaults() {
+    // Low priority so user routes override
+    _dispatcher.onGet("/ping", [](HttpRequest&, ResponseBuffer&) {
+        return HttpResponse::text("pong");
+    }, -1);
 }
 
 void HttpServer::begin() {

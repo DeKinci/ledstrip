@@ -8,7 +8,7 @@ dist/
 
 # Generated code and resources (rebuilt by infra/build)
 **/src/gen/
-**/rsc_gen/
+**/rsc/gen/
 
 # =============================================================================
 # Dependencies

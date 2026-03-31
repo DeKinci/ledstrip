@@ -38,6 +38,8 @@ private:
     ResponseBuffer _responseBuf;
     uint16_t _port;
     HttpServerConfig _config;
+
+    void registerDefaults();
 };
 
 #endif

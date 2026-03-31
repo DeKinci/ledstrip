@@ -95,10 +95,6 @@ void setup() {
     httpDispatcher.resource("/js/ui.js", microproto_ui_js);
 
     // Dynamic routes — no ETag
-    httpDispatcher.onGet("/ping", [](HttpRequest& req, ResponseBuffer&) {
-        return HttpResponse::text("pong");
-    });
-
     httpDispatcher.onPost("/echo", [](HttpRequest& req, ResponseBuffer&) {
         return HttpResponse::json(req.body().data(), req.body().length());
     });

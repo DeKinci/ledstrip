@@ -4,11 +4,12 @@ PlatformIO pre-build hook.
 Runs the full build pipeline before firmware compilation:
   1. Generate test symlinks (test_generated/)
   2. Bundle web resources (web/ -> rsc_gen/)
-  3. Compress resources into C++ headers (rsc/ + rsc_gen/ -> src/gen/)
+  3. Compress resources for all libs and the device (rsc/ -> src/gen/)
 """
 
 import os
 import subprocess
+import glob
 
 def run_tsx(project_dir, script, label):
     path = os.path.join(project_dir, script)
@@ -44,28 +45,29 @@ def before_build(source, target, env):
     project_dir = env.get("PROJECT_DIR", os.getcwd())
     src_dir = env.get("PROJECT_SRC_DIR", os.path.join(project_dir, "src"))
 
-    # Determine which device we're building by checking src_dir
-    # e.g. /path/to/ledstrip/device/ledstrip/src -> device/ledstrip
     rel_src = os.path.relpath(src_dir, project_dir)
-    device_dir = os.path.dirname(rel_src)  # device/ledstrip
+    device_dir = os.path.dirname(rel_src)
 
     # 1. Generate test symlinks
     run_tsx(project_dir, "infra/build/src/generate-test-symlinks.ts",
             "Generating test symlinks")
 
-    # 2. Bundle web resources (lib/microproto-web/web/ -> rsc_gen/)
+    # 2. Bundle web resources
     run_tsx(project_dir, "infra/build/src/bundle-web.ts",
             "Bundling web resources")
 
-    # 3. Compress resources into C++ headers
-    manifest = os.path.join(project_dir, device_dir, "resources.txt")
-    if os.path.exists(manifest):
-        run_tsx_with_args(
-            project_dir,
-            "infra/build/src/compress-resources.ts",
-            [device_dir],
-            f"Compressing resources for {device_dir}")
+    # 3. Compress resources for all libs that have resources.txt
+    compress = "infra/build/src/compress-resources.ts"
+    for manifest in glob.glob(os.path.join(project_dir, "lib", "*", "rsc", "resources.txt")):
+        lib_dir = os.path.relpath(os.path.dirname(os.path.dirname(manifest)), project_dir)
+        run_tsx_with_args(project_dir, compress, [lib_dir],
+                          f"Compressing resources for {lib_dir}")
 
-# PlatformIO hook entry point
+    # 4. Compress resources for the device
+    device_manifest = os.path.join(project_dir, device_dir, "rsc", "resources.txt")
+    if os.path.exists(device_manifest):
+        run_tsx_with_args(project_dir, compress, [device_dir],
+                          f"Compressing resources for {device_dir}")
+
 Import("env")
-env.AddPreAction("buildprog", before_build)
+before_build(None, None, env)

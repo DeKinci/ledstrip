@@ -1,0 +1,7 @@
+{
+  "name": "wifi-api",
+  "firmware": "test_wifi_api",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["http"],
+  "timeout": 60000
+}

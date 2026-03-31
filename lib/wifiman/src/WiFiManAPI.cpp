@@ -1,5 +1,5 @@
 #include "WiFiMan.h"
-#include "WiFiManWebUI.h"
+#include "gen/w_portal_htm.h"
 #include <MicroLog.h>
 #include <ResponseBuffer.h>
 
@@ -137,9 +137,7 @@ void WiFiManager::setupRoutes() {
     });
 
     // Permanent portal page
-    _dispatcher->onGet("/wifiman", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
-        return HttpResponse::html((const uint8_t*)WIFIMAN_PORTAL_HTML, strlen(WIFIMAN_PORTAL_HTML));
-    });
+    _dispatcher->resource("/wifiman", portal_htm);
 
     LOG_INFO(TAG, "Web routes ready at /wifiman");
 }
@@ -150,7 +148,7 @@ void WiFiManager::setupCaptivePortal() {
     LOG_INFO(TAG, "Setting up captive portal routes");
 
     _captiveRootHandle = _dispatcher->onGet("/", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
-        return HttpResponse::html((const uint8_t*)WIFIMAN_PORTAL_HTML, strlen(WIFIMAN_PORTAL_HTML));
+        return HttpResponse().status(200).contentType(portal_htm.contentType).body(portal_htm.data, portal_htm.length);
     }, 100);
 
     _captiveDetectCount = 0;

@@ -9,17 +9,18 @@ import path from 'path'
 import crypto from 'crypto'
 import { ROOT } from './paths.js'
 
-const deviceDir = process.argv[2]
-if (!deviceDir) {
-  console.error('Usage: compress-resources.ts <device-dir>')
+const targetDir = process.argv[2]
+if (!targetDir) {
+  console.error('Usage: compress-resources.ts <lib-or-device-dir>')
   process.exit(1)
 }
 
-const manifestPath = path.join(ROOT, deviceDir, 'resources.txt')
-const outputDir = path.join(ROOT, deviceDir, 'src', 'gen')
+const rscDir = path.join(ROOT, targetDir, 'rsc')
+const manifestPath = path.join(rscDir, 'resources.txt')
+const outputDir = path.join(ROOT, targetDir, 'src', 'gen')
 
 if (!fs.existsSync(manifestPath)) {
-  console.error(`No resources.txt found at ${manifestPath}`)
+  console.error(`No rsc/resources.txt found in ${targetDir}`)
   process.exit(1)
 }
 
@@ -124,7 +125,7 @@ console.log(`Processing ${resources.length} resources → ${outputDir}`)
 
 let regenerated = 0
 for (const res of resources) {
-  const fullSource = path.join(ROOT, res.sourcePath)
+  const fullSource = path.join(rscDir, res.sourcePath)
 
   if (!fs.existsSync(fullSource)) {
     console.log(`  ⚠ Missing: ${res.sourcePath}`)

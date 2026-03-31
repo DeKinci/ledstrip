@@ -26,10 +26,6 @@ void setup() {
 
     wifiManager.begin();
 
-    http.dispatcher().onGet("/ping", [](HttpRequest& req, ResponseBuffer&) {
-        return HttpResponse::text("pong");
-    });
-
     http.dispatcher().onGet("/json", [](HttpRequest& req, ResponseBuffer&) {
         return HttpResponse::json("{\"status\":\"ok\"}");
     });
