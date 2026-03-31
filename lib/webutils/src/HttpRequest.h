@@ -15,6 +15,9 @@ class HttpRequest {
     // Parse raw HTTP request from buffer (data must outlive HttpRequest)
     bool parse(const char* data, size_t len);
 
+    // Parse + URL-decode path and query params in-place (buffer must be writable)
+    bool parseAndDecode(char* data, size_t len);
+
     // Getters (zero-copy views into buffer)
     StringView method() const { return _method; }
     StringView path() const { return _path; }

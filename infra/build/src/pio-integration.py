@@ -1,8 +1,9 @@
 """
-PlatformIO integration for running device tests.
+PlatformIO integration for device tests.
 
-Adds a custom target: pio run -t test_device
-Delegates to the TS test runner at infra/test-runner/
+Custom targets:
+  pio run -t test_device           Run all integration test suites
+  pio run -t test_device_list      List available test suites
 """
 
 Import("env")
@@ -12,38 +13,46 @@ import time
 from pathlib import Path
 
 
-def run_integration_tests(source, target, env):
-    """Run integration tests on the device."""
+def _run_cli(env, *args):
     project_dir = Path(env.get("PROJECT_DIR", "."))
     cli = project_dir / "infra" / "test-runner" / "src" / "cli.ts"
-
     if not cli.exists():
         print(f"Test runner not found at {cli}")
         env.Exit(1)
         return
-
-    print("\n" + "=" * 60)
-    print("Running Integration Tests")
-    print("=" * 60 + "\n")
-
-    # Wait for device to boot after upload
-    print("Waiting 3 seconds for device to boot...")
-    time.sleep(3)
-
     result = subprocess.run(
-        ["npx", "tsx", str(cli), "all", "--skip-flash"],
+        ["npx", "tsx", str(cli)] + list(args),
         cwd=str(project_dir),
     )
-
     if result.returncode != 0:
         env.Exit(1)
 
 
-# Register custom target
+def run_all_tests(source, target, env):
+    print("\n" + "=" * 60)
+    print("Running Integration Tests")
+    print("=" * 60 + "\n")
+    print("Waiting 3 seconds for device to boot...")
+    time.sleep(3)
+    _run_cli(env, "all", "--skip-flash")
+
+
+def list_suites(source, target, env):
+    _run_cli(env, "list")
+
+
 env.AddCustomTarget(
     name="test_device",
     dependencies=None,
-    actions=[run_integration_tests],
+    actions=[run_all_tests],
     title="Test Device",
-    description="Run integration tests against device (auto-discovers)"
+    description="Run all integration tests against device",
+)
+
+env.AddCustomTarget(
+    name="test_device_list",
+    dependencies=None,
+    actions=[list_suites],
+    title="List Test Suites",
+    description="List available integration test suites",
 )

@@ -30,5 +30,5 @@ describe('Stress', () => {
     expect(sent).toBeGreaterThan(0)
     // We should receive at least some broadcasts back
     expect(received).toBeGreaterThan(0)
-  }, 10000)
+  })
 })

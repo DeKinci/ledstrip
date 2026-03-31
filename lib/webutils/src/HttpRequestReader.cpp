@@ -1,4 +1,5 @@
 #include "HttpRequestReader.h"
+#include "UrlDecode.h"
 
 bool HttpRequestReader::read(WiFiClient& client, RequestBuffer& buffer, HttpRequest& req,
                               const HttpReaderConfig& config) {
@@ -38,8 +39,8 @@ bool HttpRequestReader::read(WiFiClient& client, RequestBuffer& buffer, HttpRequ
         }
     }
 
-    // Parse buffer into request
-    if (!req.parse(buffer.data(), buffer.length())) {
+    // Parse buffer into request (with URL decoding — buffer is writable)
+    if (!req.parseAndDecode(buffer.data(), buffer.length())) {
         client.print("HTTP/1.1 400 Bad Request\r\n\r\n");
         client.stop();
         return false;

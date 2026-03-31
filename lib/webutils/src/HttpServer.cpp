@@ -20,19 +20,17 @@ void HttpServer::begin() {
 
 void HttpServer::loop() {
     WiFiClient client = _server.accept();
-    if (!client) {
+    if (!client) return;
+
+    client.setNoDelay(true);
+    _responseBuf.reset();
+
+    HttpRequest req;
+    if (!HttpRequestReader::read(client, _requestBuf, req, _config.reader)) {
         return;
     }
 
-    client.setNoDelay(true);
-
-    HttpRequest req;
-    if (!HttpRequestReader::read(client, _buffer, req)) {
-        return;  // Reader already sent error response
-    }
-
-    HttpResponse res = _dispatcher.dispatch(req);
-
+    HttpResponse res = _dispatcher.dispatch(req, _responseBuf);
     HttpResponseWriter::write(client, res);
     client.stop();
 }

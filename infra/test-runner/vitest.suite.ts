@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
+const testTimeout = parseInt(process.env.TEST_TIMEOUT || '10000', 10)
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -11,9 +13,9 @@ export default defineConfig({
     },
   },
   test: {
-    testTimeout: 30000,
+    testTimeout,
     hookTimeout: 15000,
     sequence: { concurrent: false },
-    globalSetup: './src/global-setup.ts',
+    globalSetup: path.resolve(__dirname, 'src/global-setup.ts'),
   },
 })

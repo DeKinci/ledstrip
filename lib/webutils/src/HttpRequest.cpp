@@ -1,4 +1,5 @@
 #include "HttpRequest.h"
+#include "UrlDecode.h"
 
 HttpRequest::HttpRequest() : _valid(false) {}
 
@@ -219,6 +220,24 @@ bool HttpRequest::hasQueryParam(StringView name) const {
         }
     }
     return false;
+}
+
+bool HttpRequest::parseAndDecode(char* data, size_t len) {
+    if (!parse(data, len)) return false;
+
+    // URL-decode path in-place (safe: data is writable, decoded <= original)
+    size_t pathLen = urlDecode(const_cast<char*>(_path.data()), _path.length());
+    _path = StringView(_path.data(), pathLen);
+
+    // URL-decode query param values in-place
+    for (int i = 0; i < _queryParamCount; i++) {
+        size_t nLen = urlDecode(const_cast<char*>(_queryParamNames[i].data()), _queryParamNames[i].length());
+        _queryParamNames[i] = StringView(_queryParamNames[i].data(), nLen);
+        size_t vLen = urlDecode(const_cast<char*>(_queryParamValues[i].data()), _queryParamValues[i].length());
+        _queryParamValues[i] = StringView(_queryParamValues[i].data(), vLen);
+    }
+
+    return true;
 }
 
 String HttpRequest::toString() const {

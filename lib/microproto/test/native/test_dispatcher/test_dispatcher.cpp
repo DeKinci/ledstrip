@@ -2,8 +2,11 @@
 #include "HttpDispatcher.h"
 #include "HttpRequest.h"
 #include "HttpResponse.h"
+#include "ResponseBuffer.h"
 
-void setUp(void) {}
+static ResponseBuffer resBuf;
+
+void setUp(void) { resBuf.reset(); }
 void tearDown(void) {}
 
 // Persistent buffer for request data (buffer must outlive HttpRequest)
@@ -23,43 +26,43 @@ void makeRequest(HttpRequest& req, const char* method, const char* path) {
 void test_dispatcher_basic_get() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/ping", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/ping", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("pong");
     });
 
     HttpRequest req;
     makeRequest(req, "GET", "/ping");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(200, res.statusCode());
-    TEST_ASSERT_EQUAL_STRING("pong", res.bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("pong", res.bodyData());
 }
 
 void test_dispatcher_basic_post() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onPost("/data", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onPost("/data", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::json("{\"ok\":true}");
     });
 
     HttpRequest req;
     makeRequest(req, "POST", "/data");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(200, res.statusCode());
-    TEST_ASSERT_EQUAL_STRING("{\"ok\":true}", res.bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("{\"ok\":true}", res.bodyData());
 }
 
 void test_dispatcher_not_found() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/exists", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/exists", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("found");
     });
 
     HttpRequest req;
     makeRequest(req, "GET", "/notexists");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(404, res.statusCode());
 }
@@ -67,14 +70,14 @@ void test_dispatcher_not_found() {
 void test_dispatcher_method_mismatch() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/resource", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/resource", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("get");
     });
 
     // POST to a GET-only endpoint
     HttpRequest req;
     makeRequest(req, "POST", "/resource");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(404, res.statusCode());
 }
@@ -86,34 +89,39 @@ void test_dispatcher_method_mismatch() {
 void test_dispatcher_path_params() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/user/{id}", [](HttpRequest& req) -> HttpResponse {
-        String userId = req.pathParam("id").toString();
-        return HttpResponse::text("user:" + userId);
+    dispatcher.onGet("/user/{id}", [](HttpRequest& req, ResponseBuffer& buf) -> HttpResponse {
+        buf.write("user:");
+        auto id = req.pathParam("id");
+        buf.write(id.data(), id.length());
+        return HttpResponse::text(buf.data(), buf.length());
     });
 
     HttpRequest req;
     makeRequest(req, "GET", "/user/42");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(200, res.statusCode());
-    TEST_ASSERT_EQUAL_STRING("user:42", res.bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("user:42", res.bodyData());
 }
 
 void test_dispatcher_multiple_path_params() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/org/{org}/user/{user}", [](HttpRequest& req) -> HttpResponse {
-        String org = req.pathParam("org");
-        String user = req.pathParam("user");
-        return HttpResponse::text(org + "/" + user);
+    dispatcher.onGet("/org/{org}/user/{user}", [](HttpRequest& req, ResponseBuffer& buf) -> HttpResponse {
+        auto org = req.pathParam("org");
+        auto user = req.pathParam("user");
+        buf.write(org.data(), org.length());
+        buf.write("/");
+        buf.write(user.data(), user.length());
+        return HttpResponse::text(buf.data(), buf.length());
     });
 
     HttpRequest req;
     makeRequest(req, "GET", "/org/acme/user/john");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(200, res.statusCode());
-    TEST_ASSERT_EQUAL_STRING("acme/john", res.bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("acme/john", res.bodyData());
 }
 
 // ============================================================================
@@ -124,46 +132,46 @@ void test_dispatcher_priority_higher_wins() {
     HttpDispatcher dispatcher;
 
     // Add low priority route first
-    dispatcher.onGet("/api/{path}", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/api/{path}", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("catch-all");
     }, 0);
 
     // Add high priority route second
-    dispatcher.onGet("/api/special", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/api/special", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("special");
     }, 10);
 
     HttpRequest req;
     makeRequest(req, "GET", "/api/special");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     // High priority should match first
     TEST_ASSERT_EQUAL(200, res.statusCode());
-    TEST_ASSERT_EQUAL_STRING("special", res.bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("special", res.bodyData());
 }
 
 void test_dispatcher_priority_captive_portal_pattern() {
     HttpDispatcher dispatcher;
 
     // Normal routes at priority 0
-    dispatcher.onGet("/", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("home");
     }, 0);
 
-    dispatcher.onGet("/settings", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/settings", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("settings");
     }, 0);
 
     // Captive portal override at priority 100
-    auto portalHandle = dispatcher.onGet("/", [](HttpRequest& req) -> HttpResponse {
+    auto portalHandle = dispatcher.onGet("/", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("captive-portal");
     }, 100);
 
     // Should get captive portal
     HttpRequest req1;
     makeRequest(req1, "GET", "/");
-    HttpResponse res1 = dispatcher.dispatch(req1);
-    TEST_ASSERT_EQUAL_STRING("captive-portal", res1.bodyString().c_str());
+    HttpResponse res1 = dispatcher.dispatch(req1, resBuf);
+    TEST_ASSERT_EQUAL_STRING("captive-portal", res1.bodyData());
 
     // Remove captive portal
     dispatcher.off(portalHandle);
@@ -171,8 +179,9 @@ void test_dispatcher_priority_captive_portal_pattern() {
     // Should get normal home now
     HttpRequest req2;
     makeRequest(req2, "GET", "/");
-    HttpResponse res2 = dispatcher.dispatch(req2);
-    TEST_ASSERT_EQUAL_STRING("home", res2.bodyString().c_str());
+    resBuf.reset();
+    HttpResponse res2 = dispatcher.dispatch(req2, resBuf);
+    TEST_ASSERT_EQUAL_STRING("home", res2.bodyData());
 }
 
 // ============================================================================
@@ -182,7 +191,7 @@ void test_dispatcher_priority_captive_portal_pattern() {
 void test_dispatcher_off_by_handle() {
     HttpDispatcher dispatcher;
 
-    auto handle = dispatcher.onGet("/temp", [](HttpRequest& req) -> HttpResponse {
+    auto handle = dispatcher.onGet("/temp", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("temporary");
     });
 
@@ -195,14 +204,14 @@ void test_dispatcher_off_by_handle() {
     // Should now 404
     HttpRequest req;
     makeRequest(req, "GET", "/temp");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
     TEST_ASSERT_EQUAL(404, res.statusCode());
 }
 
 void test_dispatcher_off_by_pattern() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/remove-me", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/remove-me", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("here");
     });
 
@@ -231,14 +240,14 @@ void test_dispatcher_void_handler() {
     HttpDispatcher dispatcher;
     voidHandlerCalled = false;
 
-    dispatcher.onPost("/action", [](HttpRequest& req) {
+    dispatcher.onPost("/action", [](HttpRequest& req, ResponseBuffer&) {
         voidHandlerCalled = true;
         // No return - void handler returns 200 OK automatically
     });
 
     HttpRequest req;
     makeRequest(req, "POST", "/action");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_TRUE(voidHandlerCalled);
     TEST_ASSERT_EQUAL(200, res.statusCode());
@@ -251,16 +260,17 @@ void test_dispatcher_void_handler() {
 void test_dispatcher_custom_not_found() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onNotFound([](HttpRequest& req) -> HttpResponse {
-        return HttpResponse::json("{\"error\":\"not found\",\"path\":\"" + req.path() + "\"}", 404);
+    dispatcher.onNotFound([](HttpRequest& req, ResponseBuffer& buf) -> HttpResponse {
+        buf.printf("{\"error\":\"not found\",\"path\":\"%.*s\"}", (int)req.path().length(), req.path().data());
+        return HttpResponse::json(buf.data(), buf.length(), 404);
     });
 
     HttpRequest req;
     makeRequest(req, "GET", "/missing");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
 
     TEST_ASSERT_EQUAL(404, res.statusCode());
-    TEST_ASSERT_TRUE(res.bodyString().indexOf("missing") >= 0);
+    TEST_ASSERT_TRUE(res.bodyData() && strstr(res.bodyData(), "missing") != nullptr);
 }
 
 // ============================================================================
@@ -270,13 +280,13 @@ void test_dispatcher_custom_not_found() {
 void test_dispatcher_clear() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/a", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/a", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("a");
     });
-    dispatcher.onGet("/b", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/b", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("b");
     });
-    dispatcher.onGet("/c", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/c", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("c");
     });
 
@@ -289,7 +299,7 @@ void test_dispatcher_clear() {
     // All should 404 now
     HttpRequest req;
     makeRequest(req, "GET", "/a");
-    HttpResponse res = dispatcher.dispatch(req);
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
     TEST_ASSERT_EQUAL(404, res.statusCode());
 }
 
@@ -302,11 +312,11 @@ void test_dispatcher_collision_different_param_names() {
     dispatcher.setWarnOnCollision(false);  // Disable warnings for this test
 
     // These should be detected as the same pattern
-    dispatcher.onGet("/user/{userid}", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/user/{userid}", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("first");
     });
 
-    dispatcher.onGet("/user/{id}", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/user/{id}", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("second");
     });
 
@@ -316,19 +326,19 @@ void test_dispatcher_collision_different_param_names() {
     // First registered wins (both at priority 0)
     HttpRequest req;
     makeRequest(req, "GET", "/user/123");
-    HttpResponse res = dispatcher.dispatch(req);
-    TEST_ASSERT_EQUAL_STRING("first", res.bodyString().c_str());
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
+    TEST_ASSERT_EQUAL_STRING("first", res.bodyData());
 }
 
 void test_dispatcher_no_collision_different_segments() {
     HttpDispatcher dispatcher;
 
     // These are different patterns - no collision
-    dispatcher.onGet("/user/{id}", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/user/{id}", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("user");
     });
 
-    dispatcher.onGet("/org/{id}", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/org/{id}", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("org");
     });
 
@@ -336,11 +346,11 @@ void test_dispatcher_no_collision_different_segments() {
 
     HttpRequest req1;
     makeRequest(req1, "GET", "/user/123");
-    TEST_ASSERT_EQUAL_STRING("user", dispatcher.dispatch(req1).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("user", dispatcher.dispatch(req1, resBuf).bodyData());
 
     HttpRequest req2;
     makeRequest(req2, "GET", "/org/456");
-    TEST_ASSERT_EQUAL_STRING("org", dispatcher.dispatch(req2).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("org", dispatcher.dispatch(req2, resBuf).bodyData());
 }
 
 // ============================================================================
@@ -351,17 +361,17 @@ void test_dispatcher_handle_stability_after_additions() {
     HttpDispatcher dispatcher;
 
     // Add low priority route, save handle
-    auto handleA = dispatcher.onGet("/test", [](HttpRequest& req) -> HttpResponse {
+    auto handleA = dispatcher.onGet("/test", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("A");
     }, 0);
 
     // Add high priority route (will cause sort, moving A)
-    dispatcher.onGet("/test", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/test", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("B");
     }, 100);
 
     // Add medium priority route (another sort)
-    dispatcher.onGet("/test", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/test", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("C");
     }, 50);
 
@@ -373,23 +383,23 @@ void test_dispatcher_handle_stability_after_additions() {
     // B (priority 100) should still match first
     HttpRequest req;
     makeRequest(req, "GET", "/test");
-    HttpResponse res = dispatcher.dispatch(req);
-    TEST_ASSERT_EQUAL_STRING("B", res.bodyString().c_str());
+    HttpResponse res = dispatcher.dispatch(req, resBuf);
+    TEST_ASSERT_EQUAL_STRING("B", res.bodyData());
 }
 
 void test_dispatcher_priority_after_removal_and_add() {
     HttpDispatcher dispatcher;
 
     // Add routes in order
-    auto h1 = dispatcher.onGet("/x", [](HttpRequest& req) -> HttpResponse {
+    auto h1 = dispatcher.onGet("/x", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("priority-100");
     }, 100);
 
-    dispatcher.onGet("/x", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/x", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("priority-50");
     }, 50);
 
-    dispatcher.onGet("/x", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/x", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("priority-0");
     }, 0);
 
@@ -399,17 +409,17 @@ void test_dispatcher_priority_after_removal_and_add() {
     // priority-50 should now match
     HttpRequest req1;
     makeRequest(req1, "GET", "/x");
-    TEST_ASSERT_EQUAL_STRING("priority-50", dispatcher.dispatch(req1).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("priority-50", dispatcher.dispatch(req1, resBuf).bodyData());
 
     // Add new route with priority 75 (should slot between removed 100 and existing 50)
-    dispatcher.onGet("/x", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/x", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("priority-75");
     }, 75);
 
     // priority-75 should now match first
     HttpRequest req2;
     makeRequest(req2, "GET", "/x");
-    TEST_ASSERT_EQUAL_STRING("priority-75", dispatcher.dispatch(req2).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("priority-75", dispatcher.dispatch(req2, resBuf).bodyData());
 }
 
 // ============================================================================
@@ -419,37 +429,37 @@ void test_dispatcher_priority_after_removal_and_add() {
 void test_dispatcher_multiple_methods() {
     HttpDispatcher dispatcher;
 
-    dispatcher.onGet("/resource", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onGet("/resource", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("GET");
     });
 
-    dispatcher.onPost("/resource", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onPost("/resource", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("POST");
     });
 
-    dispatcher.onPut("/resource", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onPut("/resource", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("PUT");
     });
 
-    dispatcher.onDelete("/resource", [](HttpRequest& req) -> HttpResponse {
+    dispatcher.onDelete("/resource", [](HttpRequest& req, ResponseBuffer&) -> HttpResponse {
         return HttpResponse::text("DELETE");
     });
 
     HttpRequest reqGet;
     makeRequest(reqGet, "GET", "/resource");
-    TEST_ASSERT_EQUAL_STRING("GET", dispatcher.dispatch(reqGet).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("GET", dispatcher.dispatch(reqGet, resBuf).bodyData());
 
     HttpRequest reqPost;
     makeRequest(reqPost, "POST", "/resource");
-    TEST_ASSERT_EQUAL_STRING("POST", dispatcher.dispatch(reqPost).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("POST", dispatcher.dispatch(reqPost, resBuf).bodyData());
 
     HttpRequest reqPut;
     makeRequest(reqPut, "PUT", "/resource");
-    TEST_ASSERT_EQUAL_STRING("PUT", dispatcher.dispatch(reqPut).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("PUT", dispatcher.dispatch(reqPut, resBuf).bodyData());
 
     HttpRequest reqDelete;
     makeRequest(reqDelete, "DELETE", "/resource");
-    TEST_ASSERT_EQUAL_STRING("DELETE", dispatcher.dispatch(reqDelete).bodyString().c_str());
+    TEST_ASSERT_EQUAL_STRING("DELETE", dispatcher.dispatch(reqDelete, resBuf).bodyData());
 }
 
 // ============================================================================

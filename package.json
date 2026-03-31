@@ -10,12 +10,12 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "test": "vitest run",
-    "test:watch": "vitest",
     "build:web": "npx tsx infra/build/src/bundle-web.ts",
-    "dev:device": "npm run dev -w @microproto/device-ui",
+    "test": "vitest run --dir module",
+    "test:watch": "vitest --dir module",
+    "test:device": "node --import tsx infra/test-runner/src/cli.ts",
     "dev:gateway": "npm run dev -w @microproto/gateway-ui",
-    "cli": "node --import tsx script/microproto-cli/src/main.ts"
+    "mpcli": "node --import tsx script/microproto-cli/src/main.ts"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

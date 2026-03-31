@@ -4,6 +4,7 @@ import { execSync } from 'child_process'
 import { buildAndUpload } from './firmware.js'
 import { discoverDevice, waitForDevice } from './discovery.js'
 import { createDeviceContext, type SuiteManifest, type DeviceContext } from './context.js'
+import { SerialMonitor } from './serial.js'
 
 const BOLD = '\x1b[1m'
 const GREEN = '\x1b[32m'
@@ -73,7 +74,16 @@ export async function runSuite(projectDir: string, suitePath: string, opts: RunO
     return false
   }
 
+  // 4. Start serial monitor
+  const serial = new SerialMonitor()
+  serial.start()
+
+  // Give serial monitor a moment to connect
+  await new Promise(r => setTimeout(r, 500))
+
   console.log(`\n${BOLD}Running tests...${RESET}\n`)
+
+  const suiteTimeout = manifest.timeout || 60000
 
   try {
     execSync(
@@ -81,17 +91,20 @@ export async function runSuite(projectDir: string, suitePath: string, opts: RunO
       {
         cwd: projectDir,
         stdio: 'inherit',
-        timeout: (manifest.timeout || 60000) + 10000,
+        timeout: suiteTimeout + 10000,
         env: {
           ...process.env,
           DEVICE_IP: ip,
           SUITE_PATH: suitePath,
+          TEST_TIMEOUT: String(manifest.testTimeout || 10000),
         },
       },
     )
+    serial.stop()
     console.log(`\n${GREEN}${BOLD}━━━ ${manifest.name}: PASSED ━━━${RESET}\n`)
     return true
   } catch (e) {
+    serial.stop()
     console.log(`\n${RED}${BOLD}━━━ ${manifest.name}: FAILED ━━━${RESET}\n`)
     return false
   }

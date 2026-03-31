@@ -6,7 +6,8 @@ export interface SuiteManifest {
   firmware: string | null
   board?: string
   capabilities: string[]
-  timeout?: number
+  timeout?: number       // Total suite timeout (default 60s)
+  testTimeout?: number   // Per-test timeout (default 10s)
 }
 
 export interface DeviceContext {

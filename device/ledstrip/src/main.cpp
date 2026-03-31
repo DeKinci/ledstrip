@@ -84,48 +84,23 @@ void setup() {
     wifiManager.setHostname("ledstrip");
     wifiManager.credentials().addNetwork("Citadel", "kekovino4ka", 100);  // Default network
 
-    // Register static page routes
-    httpDispatcher.onGet("/", [](HttpRequest& req) {
-        return HttpResponse::html(index_htm, index_htm_len);
-    });
+    // Static resources (ETag = firmware hash, auto-invalidated on reflash)
+    httpDispatcher.resource("/", index_htm);
+    httpDispatcher.resource("/proto", proto_htm);
+    httpDispatcher.resource("/ble", ble_htm);
+#ifdef MIC_ENABLED
+    httpDispatcher.resource("/mic", mic_htm);
+#endif
+    httpDispatcher.resource("/js/proto.js", microproto_client_js);
+    httpDispatcher.resource("/js/ui.js", microproto_ui_js);
 
-    httpDispatcher.onGet("/ping", [](HttpRequest& req) {
+    // Dynamic routes — no ETag
+    httpDispatcher.onGet("/ping", [](HttpRequest& req, ResponseBuffer&) {
         return HttpResponse::text("pong");
     });
 
-    httpDispatcher.onPost("/echo", [](HttpRequest& req) {
-        return HttpResponse::json(req.body().toString());
-    });
-
-    // MicroProto demo page
-    httpDispatcher.onGet("/proto", [](HttpRequest& req) {
-        return HttpResponse::html(proto_htm, proto_htm_len);
-    });
-
-    // BLE device management page
-    httpDispatcher.onGet("/ble", [](HttpRequest& req) {
-        return HttpResponse::html(ble_htm, ble_htm_len);
-    });
-
-#ifdef MIC_ENABLED
-    // Mic debug page (audio stream on port 82)
-    httpDispatcher.onGet("/mic", [](HttpRequest& req) {
-        return HttpResponse::html(mic_htm, mic_htm_len);
-    });
-#endif
-
-    httpDispatcher.onGet("/js/proto.js", [](HttpRequest& req) {
-        return HttpResponse()
-            .status(200)
-            .contentType("application/javascript")
-            .body(microproto_client_js, microproto_client_js_len);
-    });
-
-    httpDispatcher.onGet("/js/ui.js", [](HttpRequest& req) {
-        return HttpResponse()
-            .status(200)
-            .contentType("application/javascript")
-            .body(microproto_ui_js, microproto_ui_js_len);
+    httpDispatcher.onPost("/echo", [](HttpRequest& req, ResponseBuffer&) {
+        return HttpResponse::json(req.body().data(), req.body().length());
     });
 
     // Register LED API routes (shader CRUD, animation control)

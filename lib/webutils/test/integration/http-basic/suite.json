@@ -1,0 +1,7 @@
+{
+  "name": "http-basic",
+  "firmware": "test_http_basic",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["http"],
+  "timeout": 30000
+}
