@@ -3,13 +3,12 @@
   "version": "1.0.0",
   "description": "HTTP request parsing utilities for ESP32",
   "keywords": ["http", "parser", "web", "esp32"],
-  "authors": [
-    {
-      "name": "SmartGarland"
-    }
-  ],
+  "authors": [{"name": "SmartGarland"}],
   "frameworks": ["arduino"],
   "platforms": ["espressif32"],
+  "build": {
+    "srcDir": "src"
+  },
   "dependencies": {
     "MicroCore": "*"
   }

@@ -1,0 +1,7 @@
+{
+  "name": "gaslamp",
+  "firmware": "gaslamp",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["ws"],
+  "timeout": 60000
+}

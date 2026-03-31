@@ -1,0 +1,16 @@
+{
+  "name": "@microproto/build",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bundle": "node --import tsx src/bundle-web.ts",
+    "compress": "node --import tsx src/compress-resources.ts"
+  },
+  "dependencies": {
+    "esbuild": "^0.27.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0"
+  }
+}

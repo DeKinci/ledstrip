@@ -1,0 +1,21 @@
+{
+  "name": "@microproto/test-runner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "test-device": "src/cli.ts"
+  },
+  "scripts": {
+    "start": "node --import tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@microproto/client": "*",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.0.0",
+    "tsx": "^4.0.0",
+    "vitest": "^3.1.0"
+  }
+}

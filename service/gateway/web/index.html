@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MicroProto Gateway</title>
+    <link rel="stylesheet" href="/src/styles.css">
+</head>
+<body>
+    <div class="toast-container" id="toasts"></div>
+
+    <!-- Login overlay -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-box">
+            <h2>Gateway Login</h2>
+            <input type="password" id="loginToken" placeholder="Access token">
+            <button id="loginBtn">Connect</button>
+            <div class="error hidden" id="loginError"></div>
+        </div>
+    </div>
+
+    <!-- Main layout -->
+    <div class="sidebar" id="sidebar">
+        <div class="sidebar-header">Devices</div>
+        <div class="device-list" id="deviceList"></div>
+    </div>
+    <div class="main" id="main">
+        <div class="empty">Select a device</div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ace.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.4.12/ext-language_tools.min.js"></script>
+    <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

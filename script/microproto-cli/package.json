@@ -1,0 +1,20 @@
+{
+  "name": "@microproto/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "microproto": "dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "start": "node --import tsx src/main.ts"
+  },
+  "dependencies": {
+    "@microproto/client": "*",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.0.0",
+    "@types/ws": "^8.0.0"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "microproto-web",
+  "version": "0.1.0",
+  "description": "Web app shell for MicroProto devices (index.htm, generated C++ headers)",
+  "build": {
+    "srcDir": "src"
+  }
+}

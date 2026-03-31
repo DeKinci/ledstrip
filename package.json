@@ -1,0 +1,24 @@
+{
+  "name": "ledstrip",
+  "private": true,
+  "workspaces": [
+    "module/*",
+    "infra/build",
+    "infra/test-runner",
+    "script/*",
+    "service/gateway/web"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "build:web": "npx tsx infra/build/src/bundle-web.ts",
+    "dev:device": "npm run dev -w @microproto/device-ui",
+    "dev:gateway": "npm run dev -w @microproto/gateway-ui",
+    "cli": "node --import tsx script/microproto-cli/src/main.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@microproto/gateway-ui",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@microproto/client": "*",
+    "@microproto/widgets": "*"
+  },
+  "devDependencies": {
+    "vite": "^6.3.0"
+  }
+}

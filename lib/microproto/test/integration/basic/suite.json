@@ -1,0 +1,7 @@
+{
+  "name": "microproto-basic",
+  "firmware": "test_mp_basic",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["ws"],
+  "timeout": 60000
+}

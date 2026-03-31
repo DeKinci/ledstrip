@@ -3,23 +3,15 @@
   "version": "1.0.0",
   "description": "Advanced WiFi manager with multiple network support, captive portal, and non-blocking operation",
   "keywords": ["esp32", "wifi", "captive-portal", "network", "credentials"],
-  "authors": [
-    {
-      "name": "SmartGarland"
-    }
-  ],
+  "authors": [{"name": "SmartGarland"}],
   "frameworks": "arduino",
   "platforms": "espressif32",
+  "build": {
+    "srcDir": "src"
+  },
   "dependencies": [
-    {
-      "name": "ArduinoJson",
-      "version": "^7.0.0"
-    },
-    {
-      "name": "ESPAsyncWebServer"
-    },
-    {
-      "name": "AsyncTCP"
-    }
+    {"name": "ArduinoJson", "version": "^7.0.0"},
+    {"name": "ESPAsyncWebServer"},
+    {"name": "AsyncTCP"}
   ]
 }
