@@ -1,0 +1,7 @@
+{
+  "name": "microinput",
+  "version": "0.1.0",
+  "description": "Generic input gesture detection: press/release to clicks, holds, double-clicks, sequences",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}

@@ -85,19 +85,25 @@ export async function runSuite(projectDir: string, suitePath: string, opts: RunO
 
   const suiteTimeout = manifest.timeout || 60000
 
+  const runner = manifest.runner || 'vitest'
+
+  const runnerEnv = {
+    ...process.env,
+    DEVICE_IP: ip,
+    SUITE_PATH: suitePath,
+    TEST_TIMEOUT: String(manifest.testTimeout || 10000),
+  }
+
+  const runnerCmd = runner === 'pytest'
+    ? `python3 -m pytest "${testsDir}" -v --tb=short --timeout=${Math.floor((manifest.testTimeout || 10000) / 1000)}`
+    : `npx vitest run --dir "${testsDir}" --config "${path.join(path.dirname(new URL(import.meta.url).pathname), '../vitest.suite.ts')}"`
+
   try {
-    execSync(
-      `npx vitest run --dir "${testsDir}" --config "${path.join(path.dirname(new URL(import.meta.url).pathname), '../vitest.suite.ts')}"`,
-      {
-        cwd: projectDir,
+    execSync(runnerCmd, {
+        cwd: suitePath,
         stdio: 'inherit',
         timeout: suiteTimeout + 10000,
-        env: {
-          ...process.env,
-          DEVICE_IP: ip,
-          SUITE_PATH: suitePath,
-          TEST_TIMEOUT: String(manifest.testTimeout || 10000),
-        },
+        env: runnerEnv,
       },
     )
     serial.stop()

@@ -1,0 +1,9 @@
+{
+  "name": "microproto-ble",
+  "firmware": "test_mp_ble",
+  "board": "seeed_xiao_esp32s3",
+  "runner": "pytest",
+  "capabilities": ["ble"],
+  "timeout": 120000,
+  "testTimeout": 30000
+}

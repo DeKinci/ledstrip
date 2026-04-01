@@ -1,0 +1,15 @@
+{
+  "name": "microproto-ws",
+  "version": "0.1.0",
+  "description": "MicroProto WebSocket transport",
+  "keywords": ["esp32", "microproto", "websocket"],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src"
+  },
+  "dependencies": {
+    "MicroProto": "*",
+    "links2004/WebSockets": "^2.7.1"
+  }
+}

@@ -6,8 +6,8 @@
 #include <WiFiMan.h>
 #include <PropertySystem.h>
 #include <MicroProtoController.h>
-#include <transport/MicroProtoServer.h>
-#include <transport/MicroProtoBleServer.h>
+#include <MicroProtoServer.h>
+#include <MicroProtoBleServer.h>
 
 #include "animations/Anime.h"
 #include "web/LedApiController.h"
@@ -17,15 +17,15 @@
 #ifdef MIC_ENABLED
 #include "input/MicInput.hpp"
 #endif
-#include "ble/BleDeviceManager.hpp"
-#include "gateway/GatewayClient.h"
+#include <GatewayClient.h>
+#include "ble_setup.h"
 #include <MicroBLE.h>
+#include <BleMan.h>
 #include <MicroLog.h>
 #include <MicroLogProto.h>
 
 #include "gen/w_index_htm.h"
 #include "gen/w_proto_htm.h"
-#include "gen/w_ble_htm.h"
 #include "gen/w_microproto_client_js.h"
 #include "gen/w_microproto_ui_js.h"
 #ifdef MIC_ENABLED
@@ -37,6 +37,7 @@ MicroProto::MicroProtoController protoController;
 MicroProto::MicroProtoServer protoServer(81);
 MicroProto::MicroProtoBleServer protoBle;
 WiFiMan::WiFiManager wifiManager(&httpDispatcher);
+BleMan::BleManager bleManager(&httpDispatcher);
 
 CallResult<void*> animeStatus(nullptr);
 
@@ -55,7 +56,10 @@ void setup() {
 
     // Initialize BLE FIRST (before WiFi) - they share the radio
     MicroBLE::init("SmartGarland");
-    BleDeviceManager::init();
+
+    // Register BLE drivers and start manager
+    BleSetup::init(bleManager);
+    bleManager.begin();
 
     // Initialize MicroProto controller + transports
     protoController.begin();
@@ -98,7 +102,6 @@ void setup() {
     // Static resources (ETag = firmware hash, auto-invalidated on reflash)
     httpDispatcher.resource("/", index_htm);
     httpDispatcher.resource("/proto", proto_htm);
-    httpDispatcher.resource("/ble", ble_htm);
 #ifdef MIC_ENABLED
     httpDispatcher.resource("/mic", mic_htm);
 #endif
@@ -172,7 +175,7 @@ void loop() {
     yield();
 
     // BLE device management
-    BleDeviceManager::loop();
+    bleManager.loop();
     yield();
 
     // LED animation

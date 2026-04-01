@@ -155,6 +155,12 @@ T min(T a, T b) { return a < b ? a : b; }
 template<typename T>
 T max(T a, T b) { return a > b ? a : b; }
 
+// Mock millis() — test code controls time via mockMillis
+extern uint32_t _mockMillisValue;
+inline uint32_t millis() { return _mockMillisValue; }
+inline void mockMillis(uint32_t ms) { _mockMillisValue = ms; }
+inline void mockMillisAdvance(uint32_t ms) { _mockMillisValue += ms; }
+
 // Mock Serial class
 class MockSerial {
 public:

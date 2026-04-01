@@ -15,6 +15,7 @@ void registerService(BleGattService*) {}
 #else
 
 #include <MicroLog.h>
+#include <esp_coexist.h>
 
 static const char* TAG = "MicroBLE";
 
@@ -63,6 +64,10 @@ static ServerCallbackMux _mux;
 
 void init(const char* deviceName, int8_t power) {
     if (_initialized) return;
+
+    // Balance radio time between WiFi and BLE. Without this, BLE can
+    // starve WiFi causing HTTP connection drops during concurrent traffic.
+    esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
 
     NimBLEDevice::init(deviceName);
     NimBLEDevice::setPower((esp_power_level_t)power);

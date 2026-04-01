@@ -1,0 +1,9 @@
+{
+  "name": "bleman-api",
+  "firmware": "test_bleman",
+  "board": "seeed_xiao_esp32s3",
+  "runner": "pytest",
+  "capabilities": ["http", "ble"],
+  "timeout": 600000,
+  "testTimeout": 60000
+}

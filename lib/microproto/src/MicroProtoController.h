@@ -7,7 +7,7 @@
 #include "messages/MessageRouter.h"
 #include "messages/Hello.h"
 #include "messages/Error.h"
-#include "transport/MicroProtoTransport.h"
+#include "MicroProtoTransport.h"
 #include "wire/Buffer.h"
 #include <array>
 

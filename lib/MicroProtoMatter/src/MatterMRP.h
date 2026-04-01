@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "MatterConst.h"
+#include "MatterMessage.h"
 
 namespace matter {
 
@@ -98,6 +99,7 @@ public:
     }
 
     // Tick all slots; returns first retransmit needed, nullptr if none
+    // Updates piggybacked ACK in retransmitted message if we have a pending ACK
     const uint8_t* tick(size_t& len) {
         uint32_t now = millis();
         for (auto& slot : _retransmit) {
@@ -115,6 +117,29 @@ public:
                 backoff = backoff * 16 / 10;
             if (backoff > 10000) backoff = 10000;
             slot.nextRetryMs = now + backoff;
+
+            // Update piggybacked ACK if we have a pending one
+            // Protocol header starts after message header (decode to find offset)
+            if (_pendingAck && slot.len > 8) {
+                MessageHeader hdr;
+                size_t hdrLen = hdr.decode(slot.data, slot.len);
+                if (hdrLen > 0 && hdrLen < slot.len) {
+                    uint8_t* protoStart = slot.data + hdrLen;
+                    uint8_t exFlags = protoStart[0];
+                    if (exFlags & kExAck) {
+                        // ACK field is at offset 6 (after exFlags, opcode, exchangeId, protocolId)
+                        size_t ackOff = hdrLen + 6;
+                        if (ackOff + 4 <= slot.len) {
+                            slot.data[ackOff]     = _pendingAckCounter & 0xFF;
+                            slot.data[ackOff + 1] = (_pendingAckCounter >> 8) & 0xFF;
+                            slot.data[ackOff + 2] = (_pendingAckCounter >> 16) & 0xFF;
+                            slot.data[ackOff + 3] = (_pendingAckCounter >> 24) & 0xFF;
+                            _pendingAck = false;
+                        }
+                    }
+                }
+            }
+
             len = slot.len;
             return slot.data;
         }

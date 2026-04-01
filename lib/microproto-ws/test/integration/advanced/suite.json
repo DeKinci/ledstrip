@@ -1,0 +1,8 @@
+{
+  "name": "microproto-advanced",
+  "firmware": "test_mp_advanced",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["ws"],
+  "timeout": 120000,
+  "testTimeout": 15000
+}

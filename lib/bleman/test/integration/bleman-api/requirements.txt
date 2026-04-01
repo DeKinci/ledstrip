@@ -1,0 +1,6 @@
+bless>=0.3
+bleak>=0.22
+requests>=2.31
+pytest>=8.0
+pytest-asyncio>=0.24
+pytest-timeout>=2.3

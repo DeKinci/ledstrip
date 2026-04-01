@@ -66,6 +66,9 @@ void MatterTransport::loop() {
         handlePacket(_rt->rxBuf, len, srcIp, srcPort);
     }
 
+    // Exchange timeout (reset stuck handshakes)
+    _rt->session.checkTimeout();
+
     // MRP retransmit
     size_t retLen;
     const uint8_t* retData = _rt->mrp.tick(retLen);
@@ -285,10 +288,10 @@ void MatterTransport::advertiseOperational() {
     MDNS.end();
     MDNS.begin(instance);
 
-    MDNS.addService("_matter", "_tcp", kPort);
-    MDNS.addServiceTxt("_matter", "_tcp", "SII", "5000");
-    MDNS.addServiceTxt("_matter", "_tcp", "SAI", "300");
-    MDNS.addServiceTxt("_matter", "_tcp", "T", "0");
+    MDNS.addService("_matter", "_udp", kPort);
+    MDNS.addServiceTxt("_matter", "_udp", "SII", "5000");
+    MDNS.addServiceTxt("_matter", "_udp", "SAI", "300");
+    MDNS.addServiceTxt("_matter", "_udp", "T", "0");
 }
 
 } // namespace matter

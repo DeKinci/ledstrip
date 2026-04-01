@@ -22,6 +22,31 @@ void MatterSession::begin(uint32_t passcode, uint16_t discriminator) {
 }
 
 // ---------------------------------------------------------------------------
+// Exchange timeout — reset stuck handshakes
+// ---------------------------------------------------------------------------
+
+void MatterSession::checkTimeout() {
+    // Only timeout mid-handshake states
+    bool inHandshake = (_state == PASE_WAIT_PAKE1 || _state == PASE_WAIT_PAKE3 ||
+                        _state == CASE_WAIT_SIGMA3);
+    if (!inHandshake || _exchangeStartMs == 0) return;
+
+#ifndef NATIVE_TEST
+    uint32_t now = ::millis();
+    if ((now - _exchangeStartMs) >= kExchangeTimeoutMs) {
+        // Reset to initial state
+        if (_state == CASE_WAIT_SIGMA3) {
+            _caseTranscript.release();
+            _state = _fabric.valid ? CASE_WAIT_SIGMA1 : PASE_WAIT_PBKDF_REQ;
+        } else {
+            openCommissioning();
+        }
+        _exchangeStartMs = 0;
+    }
+#endif
+}
+
+// ---------------------------------------------------------------------------
 // Secure Channel dispatch
 // ---------------------------------------------------------------------------
 
@@ -32,8 +57,19 @@ bool MatterSession::handleSecureChannel(uint8_t opcode,
                                          MatterTransport& transport) {
     switch (opcode) {
         case kOpPBKDFParamRequest:
-            if (_state == PASE_WAIT_PBKDF_REQ)
+            // Per Matter Spec 4.13: a new PBKDFParamRequest restarts PASE
+            // regardless of current state (allows commissioner retry)
+            if (_state == PASE_WAIT_PBKDF_REQ ||
+                _state == PASE_WAIT_PAKE1 ||
+                _state == PASE_WAIT_PAKE3) {
+                // Reset PASE state for fresh attempt
+                if (_state != PASE_WAIT_PBKDF_REQ) {
+                    _contextLen = 0;
+                    memset(&_spake, 0, sizeof(_spake));
+                    memset(&_sessionKeys, 0, sizeof(_sessionKeys));
+                }
                 handlePBKDFParamReq(payload, payloadLen, msgHdr, protoHdr, transport);
+            }
             return true;
         case kOpPasePake1:
             if (_state == PASE_WAIT_PAKE1)
@@ -51,8 +87,22 @@ bool MatterSession::handleSecureChannel(uint8_t opcode,
             if (_state == CASE_WAIT_SIGMA3)
                 handleSigma3(payload, payloadLen, msgHdr, protoHdr, transport);
             return true;
-        case kOpStatusReport:
-            return true; // Acknowledge, no action needed
+        case kOpStatusReport: {
+            // Parse StatusReport to check for errors
+            StatusReport sr;
+            if (payloadLen >= 8) sr.decode(payload, payloadLen);
+            if (sr.generalCode != kGeneralSuccess) {
+                // Peer reported error — reset handshake state
+                if (_state == PASE_WAIT_PAKE1 || _state == PASE_WAIT_PAKE3) {
+                    openCommissioning();
+                } else if (_state == CASE_WAIT_SIGMA3) {
+                    _caseTranscript.release();
+                    _state = _fabric.valid ? CASE_WAIT_SIGMA1 : PASE_WAIT_PBKDF_REQ;
+                }
+                _exchangeStartMs = 0;
+            }
+            return true;
+        }
         default:
             return false;
     }
@@ -133,6 +183,9 @@ void MatterSession::handlePBKDFParamReq(const uint8_t* payload, size_t len,
     transport.sendSecureChannel(kOpPBKDFParamResponse, resp, wr.size(),
                                 protoHdr.exchangeId, msgHdr.messageCounter);
     _state = PASE_WAIT_PAKE1;
+#ifndef NATIVE_TEST
+    _exchangeStartMs = ::millis();
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -172,7 +225,14 @@ void MatterSession::handlePake1(const uint8_t* payload, size_t len,
 
     // Compute SPAKE2+ response (pass 32-byte context hash)
     if (!spake2pComputeResponse(_spake, paseContext, kSHA256Size)) {
-        // TODO: send error StatusReport
+        StatusReport sr;
+        sr.generalCode = kGeneralFailure;
+        sr.protocolId = kProtoSecureChannel;
+        sr.protocolCode = kProtoCodeInvalidParam;
+        uint8_t errBuf[8];
+        size_t errLen = sr.encode(errBuf, sizeof(errBuf));
+        transport.sendSecureChannel(kOpStatusReport, errBuf, errLen,
+                                    protoHdr.exchangeId, msgHdr.messageCounter);
         _state = PASE_WAIT_PBKDF_REQ;
         return;
     }
@@ -238,6 +298,7 @@ void MatterSession::handlePake3(const uint8_t* payload, size_t len,
                                 protoHdr.exchangeId, msgHdr.messageCounter);
 
     _state = PASE_ACTIVE;
+    _exchangeStartMs = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +445,9 @@ void MatterSession::handleSigma1(const uint8_t* payload, size_t len,
                                 protoHdr.exchangeId, msgHdr.messageCounter);
 
     _state = CASE_WAIT_SIGMA3;
+#ifndef NATIVE_TEST
+    _exchangeStartMs = ::millis();
+#endif
 }
 
 // ---------------------------------------------------------------------------
@@ -510,6 +574,7 @@ void MatterSession::handleSigma3(const uint8_t* payload, size_t len,
                                 protoHdr.exchangeId, msgHdr.messageCounter);
 
     _state = CASE_ACTIVE;
+    _exchangeStartMs = 0;
 }
 
 // ---------------------------------------------------------------------------

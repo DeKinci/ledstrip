@@ -1,0 +1,8 @@
+{
+  "name": "microproto-gw",
+  "firmware": "test_mp_gw",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["ws"],
+  "timeout": 60000,
+  "testTimeout": 15000
+}

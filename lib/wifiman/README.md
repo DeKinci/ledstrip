@@ -1,340 +1,120 @@
-# WiFiMan - Advanced WiFi Manager for ESP32
+# wifiman
 
-A robust, non-blocking WiFi manager with support for multiple saved networks, captive portal configuration, and smart connection management.
+Owns the WiFi lifecycle completely. After `begin()`, the application shouldn't think about WiFi — wifiman handles scanning, connecting, reconnecting, fallback to AP mode, and user configuration via captive portal.
 
-## Features
+## Role
 
-- **Multiple Network Support**: Save and manage multiple WiFi credentials with priority levels
-- **Non-Blocking Operation**: Never blocks your main loop - continues operation during connection attempts
-- **Smart Network Scanning**: Always scans for available networks before connecting - only attempts connection to networks that are actually in range
-- **Smart Connection**: Automatically connects to the best available network based on priority, signal strength, and connection history
-- **Captive Portal**: Beautiful web-based configuration interface when in AP mode
-- **Persistent Storage**: Credentials saved to NVS (Non-Volatile Storage)
-- **Auto-Retry**: Intelligent retry logic with configurable delays
-- **Status Callbacks**: Hook into connection events for custom behavior
+wifiman exists so that:
 
-## Installation
+- The application calls `begin()` and `loop()` and gets a working network connection
+- Multiple networks are supported with priority-based selection — only networks actually in range are attempted
+- When nothing works, users can configure WiFi through a captive portal without reflashing
+- Credentials persist across reboots in NVS
+- Connection state is exposed via callbacks so the app can react (start services on connect, pause on disconnect)
 
-This library is designed for PlatformIO. It's already included in the `lib/` folder.
+wifiman registers its routes on an `HttpDispatcher` — it doesn't own the HTTP server.
 
-### Dependencies
+## What It Is Not
 
-- ArduinoJson (^7.0.0)
-- ESPAsyncWebServer
-- AsyncTCP
+- Not a network stack — it manages WiFi association and IP acquisition, not sockets or protocols
+- Not a provisioning system — no BLE provisioning, no SmartConfig. Just scan + captive portal.
+- Not blocking — every state transition happens in `loop()` via a non-blocking state machine (< 1ms per call)
 
 ## Quick Start
 
-### Basic Usage
-
 ```cpp
-#include <WiFiMan.h>
-#include <ESPAsyncWebServer.h>
-
-AsyncWebServer server(80);
-WiFiMan::WiFiManager wifiManager(&server);
+WiFiMan::WiFiManager wifi(&httpDispatcher);
 
 void setup() {
-    Serial.begin(115200);
-
-    // Configure AP credentials (used when no networks available)
-    wifiManager.setAPCredentials("ESP32-Setup", "");
-
-    // Set hostname
-    wifiManager.setHostname("mydevice");
-
-    // Optional: Add network programmatically
-    wifiManager.credentials().addNetwork("MyWiFi", "mypassword", 100);
-
-    // Start the manager
-    wifiManager.begin();
-
-    // Start your web server
-    server.begin();
+    wifi.setAPCredentials("MyDevice-Setup");
+    wifi.setHostname("mydevice");
+    wifi.credentials().addNetwork("HomeWiFi", "pass", 100);
+    wifi.begin();
 }
 
 void loop() {
-    // MUST call this regularly
-    wifiManager.loop();
-
-    // Your application code here
+    wifi.loop();
 }
 ```
 
-### With Callbacks
+## Connection Flow
 
-```cpp
-void setup() {
-    Serial.begin(115200);
+1. **SCANNING** — async scan for what's actually in range
+2. **Sorting** — saved networks ranked by priority > last-connected > RSSI
+3. **CONNECTING** — tries each matching network in order
+4. **CONNECTED** — monitors link, auto-retries on drop
+5. **FAILED** — all attempts exhausted, retries after delay or falls back to AP mode
 
-    wifiManager.setAPCredentials("ESP32-Setup");
-
-    // Called when connected to WiFi
-    wifiManager.onConnected([](const String& ssid) {
-        Serial.printf("Connected to %s\n", ssid.c_str());
-        Serial.printf("IP: %s\n", wifiManager.getIP().toString().c_str());
-        // Start your services here
-    });
-
-    // Called when disconnected
-    wifiManager.onDisconnected([]() {
-        Serial.println("WiFi disconnected");
-        // Stop services or handle reconnection
-    });
-
-    // Called when AP mode starts
-    wifiManager.onAPStarted([](const String& ssid) {
-        Serial.printf("AP Mode started: %s\n", ssid.c_str());
-        Serial.printf("Configure at: http://%s\n",
-                     wifiManager.getIP().toString().c_str());
-    });
-
-    wifiManager.begin();
-    server.begin();
-}
-```
-
-## Configuration Options
-
-### Connection Settings
-
-```cpp
-// Set connection timeout (default: 15000ms)
-wifiManager.setConnectionTimeout(20000);
-
-// Set retry delay after failed connection (default: 5000ms)
-wifiManager.setRetryDelay(10000);
-
-// Set AP timeout - auto-connect after timeout (0 = never, default: 0)
-wifiManager.setAPTimeout(300000);  // 5 minutes
-```
-
-### Managing Credentials
-
-```cpp
-WiFiMan::WiFiCredentials& creds = wifiManager.credentials();
-
-// Add network with priority (higher = preferred)
-creds.addNetwork("HomeWiFi", "password123", 100);
-creds.addNetwork("WorkWiFi", "workpass", 50);
-
-// Remove network
-creds.removeNetwork("OldWiFi");
-
-// Update priority
-creds.updatePriority("HomeWiFi", 200);
-
-// Clear all saved networks
-creds.clearAll();
-
-// Check if network exists
-if (creds.hasNetwork("MyWiFi")) {
-    // ...
-}
-
-// Get all networks
-const std::vector<WiFiMan::NetworkCredential>& networks = creds.getAll();
-for (const auto& net : networks) {
-    Serial.printf("SSID: %s, Priority: %d\n", net.ssid.c_str(), net.priority);
-}
-```
+No time is wasted attempting networks that aren't broadcasting.
 
 ## States
 
-The WiFi manager operates in several states:
-
-- **IDLE**: Not actively doing anything
-- **SCANNING**: Scanning for available networks
-- **CONNECTING**: Attempting to connect to a network
-- **CONNECTED**: Successfully connected to WiFi
-- **AP_MODE**: Running as Access Point (configuration mode)
-- **FAILED**: Connection failed, will retry
+| State | Meaning |
+|-------|---------|
+| `IDLE` | Not started or manually stopped |
+| `SCANNING` | Async network scan in progress |
+| `CONNECTING` | Attempting association |
+| `CONNECTED` | Link up, IP acquired |
+| `AP_MODE` | Access point running, captive portal active |
+| `FAILED` | All attempts failed, will retry |
 
 ```cpp
-WiFiMan::State state = wifiManager.getState();
-String stateStr = wifiManager.getStateString();
+wifi.isConnected();
+wifi.isAPMode();
+wifi.getIP();
+wifi.getCurrentSSID();
+wifi.getLastError();  // "Wrong password", "Network not found", etc.
+```
 
-if (wifiManager.isConnected()) {
-    // Do something
-}
+## Credentials
 
-if (wifiManager.isAPMode()) {
-    // Show configuration prompt
-}
+```cpp
+auto& creds = wifi.credentials();
+creds.addNetwork("Home", "pass", /*priority=*/100);
+creds.addNetwork("Work", "pass", /*priority=*/50);
+creds.removeNetwork("Old");
+creds.clearAll();
+```
+
+Up to 10 networks. Stored in NVS with RSSI history and last-connected timestamps.
+
+## Callbacks
+
+```cpp
+wifi.onConnected([](const String& ssid) { /* start services */ });
+wifi.onDisconnected([]() { /* pause services */ });
+wifi.onAPStarted([](const String& ssid) { /* portal is live */ });
+wifi.onAPClientConnected([](uint8_t n) { /* n clients on AP */ });
+```
+
+## Configuration
+
+```cpp
+wifi.setConnectionTimeout(15000);  // per-network attempt (default 15s)
+wifi.setRetryDelay(5000);          // between retry cycles (default 5s)
+wifi.setAPTimeout(0);              // AP auto-shutdown, 0 = never
 ```
 
 ## Captive Portal
 
-When the WiFi manager enters AP mode (either because no credentials are saved, or all connection attempts failed), it starts a captive portal that allows users to:
+In AP mode, wifiman intercepts captive portal detection requests (`/generate_204`, `/hotspot-detect.html`, etc.) and serves a configuration UI. REST API:
 
-1. Scan for available networks
-2. Add new WiFi credentials with priorities
-3. View and manage saved networks
-4. Remove networks
-5. Trigger immediate connection attempts
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/wifiman` | Configuration UI |
+| GET | `/wifiman/status` | State, IP, SSID, errors |
+| GET | `/wifiman/scan` | Available networks |
+| GET | `/wifiman/list` | Saved credentials |
+| POST | `/wifiman/add` | Add `{ssid, password?, priority?}` |
+| POST | `/wifiman/remove` | Remove `{ssid}` |
+| POST | `/wifiman/clear` | Clear all |
+| POST | `/wifiman/connect` | Trigger connection from AP mode |
 
-The captive portal is accessible at:
-- http://192.168.4.1/ (default AP IP)
-- Most devices will auto-redirect when connecting to the AP
-
-### Captive Portal Endpoints
-
-The following REST API endpoints are available:
-
-- `GET /wifiman/scan` - Scan for networks
-- `GET /wifiman/list` - List saved networks
-- `POST /wifiman/add` - Add network (JSON: {ssid, password, priority})
-- `POST /wifiman/remove` - Remove network (JSON: {ssid})
-- `POST /wifiman/clear` - Clear all networks
-- `POST /wifiman/connect` - Trigger connection attempt
-- `GET /wifiman/status` - Get current status
-
-## Advanced Usage
-
-### Manual Control
+## Manual Control
 
 ```cpp
-// Force start AP mode
-wifiManager.startAP();
-
-// Stop AP mode
-wifiManager.stopAP();
-
-// Disconnect from current network
-wifiManager.disconnect();
-
-// Retry connection to saved networks
-wifiManager.retry();
+wifi.startAP();     // force AP mode
+wifi.stopAP();
+wifi.disconnect();  // go idle
+wifi.retry();       // retry from FAILED/IDLE
 ```
-
-### Integration with Existing Web Server
-
-If you already have a web server with routes, WiFiMan will only add its routes when in AP mode. Your existing routes work normally when connected to WiFi.
-
-```cpp
-AsyncWebServer server(80);
-WiFiMan::WiFiManager wifiManager(&server);
-
-void setup() {
-    // Add your routes
-    server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *request) {
-        request->send(200, "application/json", "{\"status\":\"ok\"}");
-    });
-
-    // Start WiFiMan (will add captive portal routes when in AP mode)
-    wifiManager.begin();
-
-    // Start server
-    server.begin();
-}
-```
-
-## Non-Blocking Behavior
-
-WiFiMan is **completely non-blocking** and never calls `delay()`. This means:
-
-- Network scanning happens asynchronously via `WiFi.scanNetworks(true)`
-- Connection attempts use non-blocking `WiFi.begin()` and `WiFi.disconnect(false, false)`
-- **Only networks that were found in the scan will be attempted** - no wasted time
-- All timing uses `millis()` comparisons, never `delay()`
-- State transitions are immediate and handled in `loop()`
-- Typical execution time per `loop()` call: **< 1ms**
-- Your application continues to run at full speed during all WiFi operations
-
-**Important**: You MUST call `wifiManager.loop()` regularly (every iteration of your main loop) for the manager to function properly.
-
-## How Connection Works
-
-WiFiMan uses a smart scan-first approach:
-
-1. **SCANNING**: Performs async network scan to find what's actually available
-2. **Filtering**: Only considers saved networks that were found in the scan
-3. **Sorting**: Sorts available networks by priority → last connected → signal strength
-4. **CONNECTING**: Attempts connection only to available networks in sorted order
-5. **Auto-Retry**: If connection lost or all attempts fail, re-scans and tries again
-
-This approach ensures you never waste time trying to connect to networks that aren't in range.
-
-## Persistence
-
-All credentials are automatically saved to ESP32's NVS (Non-Volatile Storage) and persist across reboots. The library stores:
-
-- Network SSIDs and passwords
-- Priority levels
-- Last known RSSI (signal strength)
-- Last successful connection timestamp
-
-## Migration from NetWizard
-
-If you're migrating from NetWizard:
-
-```cpp
-// Before (NetWizard)
-DNSServer dnsServer;
-AsyncWebServer server(80);
-NetWizard NW(&server);
-
-void setup() {
-    NW.setStrategy(NetWizardStrategy::NON_BLOCKING);
-    NW.autoConnect("LED", "");
-    NW.loop();
-}
-
-// After (WiFiMan)
-AsyncWebServer server(80);
-WiFiMan::WiFiManager wifiManager(&server);
-
-void setup() {
-    wifiManager.setAPCredentials("LED", "");
-    wifiManager.begin();
-    server.begin();
-}
-
-void loop() {
-    wifiManager.loop();  // Instead of NW.loop()
-}
-```
-
-## Example Project Structure
-
-```
-src/
-  main.cpp
-lib/
-  wifiman/
-    WiFiMan.h
-    WiFiMan.cpp
-    WiFiCredentials.h
-    WiFiCredentials.cpp
-    WiFiManAPI.cpp
-    WiFiManWebUI.h
-    library.json
-    README.md
-```
-
-## Troubleshooting
-
-### WiFi not connecting
-
-1. Check credentials are correct
-2. Verify network is in range
-3. Check serial output for connection attempts
-4. Ensure `loop()` is being called
-
-### Captive portal not appearing
-
-1. Verify you're connected to the ESP32's AP
-2. Try navigating to http://192.168.4.1/
-3. Check that the web server was passed to WiFiMan constructor
-4. Some devices may require disabling mobile data
-
-### Memory issues
-
-The web UI is stored in PROGMEM to minimize RAM usage. If you experience memory issues, you can:
-
-1. Reduce the number of saved networks (MAX_NETWORKS in WiFiCredentials.h)
-2. Increase the connection timeout to allow more time per network
-
-## License
-
-Part of the SmartGarland project.

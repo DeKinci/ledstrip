@@ -53,13 +53,17 @@ bool BleGattService::send(uint8_t slot, const uint8_t* data, size_t len) {
     handle = _clients[slot].connHandle;
     portEXIT_CRITICAL(&_mux);
 
-    _txChar->setValue(data, len);
-    if (_config.txIndicate) {
-        _txChar->indicate(handle);
-    } else {
-        _txChar->notify(handle);
+    // Use the data-passing overload: sends the notification with the given data
+    // WITHOUT updating the stored characteristic value. This prevents stale data
+    // from being cached by the client's BLE stack across reconnections.
+    for (int attempt = 0; attempt < 50; attempt++) {
+        bool ok = _config.txIndicate
+            ? _txChar->indicate(data, len, handle)
+            : _txChar->notify(data, len, handle);
+        if (ok) return true;
+        vTaskDelay(2);  // Queue full — let BLE controller drain
     }
-    return true;
+    return false;
 }
 
 // ---------------------------------------------------------------------------

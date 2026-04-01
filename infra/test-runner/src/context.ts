@@ -6,6 +6,7 @@ export interface SuiteManifest {
   firmware: string | null
   board?: string
   capabilities: string[]
+  runner?: 'vitest' | 'pytest'  // Test runner (default: vitest)
   timeout?: number       // Total suite timeout (default 60s)
   testTimeout?: number   // Per-test timeout (default 10s)
 }

@@ -1,0 +1,8 @@
+{
+  "name": "microlog-up",
+  "firmware": "test_logup",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["ws"],
+  "timeout": 60000,
+  "testTimeout": 15000
+}

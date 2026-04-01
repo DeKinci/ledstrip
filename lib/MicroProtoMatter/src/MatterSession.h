@@ -61,6 +61,7 @@ public:
     };
 
     void begin(uint32_t passcode, uint16_t discriminator);
+    void checkTimeout();  // Call from loop() — resets stuck handshakes
     State state() const { return _state; }
     bool isSecure() const { return _state == PASE_ACTIVE || _state == CASE_ACTIVE; }
     bool isCommissioned() const { return _fabric.valid; }
@@ -145,6 +146,10 @@ private:
     uint16_t    _paseExchangeId = 0;
     SessionKeys _sessionKeys = {};
     FabricInfo  _fabric;
+
+    // Exchange timeout — reset stuck handshakes after 30s
+    static constexpr uint32_t kExchangeTimeoutMs = 30000;
+    uint32_t    _exchangeStartMs = 0;
 
     // PASE state (only valid during commissioning)
     Spake2pState _spake = {};

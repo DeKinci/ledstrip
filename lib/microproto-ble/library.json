@@ -1,0 +1,15 @@
+{
+  "name": "microproto-ble",
+  "version": "0.1.0",
+  "description": "MicroProto BLE transport",
+  "keywords": ["esp32", "microproto", "ble"],
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": {
+    "srcDir": "src"
+  },
+  "dependencies": {
+    "MicroProto": "*",
+    "microble": "*"
+  }
+}

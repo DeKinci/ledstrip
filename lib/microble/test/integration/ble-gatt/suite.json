@@ -1,0 +1,9 @@
+{
+  "name": "ble-gatt",
+  "firmware": "test_ble_gatt",
+  "board": "seeed_xiao_esp32s3",
+  "runner": "pytest",
+  "capabilities": ["http", "ble"],
+  "timeout": 300000,
+  "testTimeout": 30000
+}

@@ -39,12 +39,12 @@ lib/microproto/
 │   ├── Schema.h/.cpp       # Schema serialization
 │   └── MessageRouter.h/.cpp # Opcode dispatch → MessageHandler interface
 │
-└── transport/              # Transport layer (thin wrappers)
-    ├── MicroProtoTransport.h    # Abstract transport interface
-    ├── MicroProtoServer.h/.cpp  # WebSocket transport
-    ├── MicroProtoBleServer.h/.cpp # BLE transport (fragmentation, reassembly)
-    └── BleFragmentation.h       # BLE fragment/reassemble helpers
+└── MicroProtoTransport.h   # Abstract transport interface
 ```
+
+Transport implementations live in separate libraries:
+- `microproto-ws` — WebSocket transport (MicroProtoServer)
+- `microproto-ble` — BLE transport (MicroProtoBleServer)
 
 ## Key Classes
 
@@ -55,9 +55,9 @@ lib/microproto/
 - Manages multiple transports via `registerTransport()`
 - Routes messages to correct transport via global client IDs
 
-### MicroProtoTransport (transport/MicroProtoTransport.h)
+### MicroProtoTransport (MicroProtoTransport.h)
 - Abstract interface: `send()`, `maxClients()`, `isClientConnected()`, `maxPacketSize()`, `capabilities()`
-- Implemented by: WebSocket (MicroProtoServer), BLE (MicroProtoBleServer), Gateway (GatewayTransport)
+- Implemented by: microproto-ws (MicroProtoServer), microproto-ble (MicroProtoBleServer), GatewayTransport (app-level)
 - BLE transport returns `capabilities().requiresBleExposed = true` for property filtering
 
 ### PropertyBase (PropertyBase.h)

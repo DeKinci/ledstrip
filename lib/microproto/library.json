@@ -10,7 +10,6 @@
     "srcDir": "src"
   },
   "dependencies": {
-    "links2004/WebSockets": "^2.7.1",
     "MicroCore": "*"
   }
 }

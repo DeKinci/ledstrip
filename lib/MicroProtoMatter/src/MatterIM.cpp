@@ -84,37 +84,44 @@ void MatterIM::handleReadRequest(const uint8_t* payload, size_t len,
                             if (rd.tag() == 3) cl = rd.getU32();
                             if (rd.tag() == 4) at = rd.getU32();
                         }
-                        if (ep != 0xFFFF && _clusters) {
-                            // Probe read into temp buffer first
-                            uint8_t tmpBuf[256];
-                            TLVWriter tmpWr(tmpBuf, sizeof(tmpBuf));
-                            bool ok = _clusters->readAttribute(ep, cl, at, tmpWr, 2);
+                        if (_clusters) {
+                            // Wildcard: iterate all endpoints; specific: just the one
+                            static const uint16_t kEndpoints[] = {0, 1};
+                            for (uint16_t eid : kEndpoints) {
+                                if (ep != 0xFFFF && eid != ep) continue;
 
-                            wr.openStruct(kAnon);   // AttributeReportIB
-                            if (ok && !tmpWr.error()) {
-                                wr.openStruct(1);        // tag 1: AttributeDataIB
-                                wr.putU32(0, _clusters->dataVersion);
-                                wr.openList(1);          // tag 1: AttributePath
-                                wr.putU16(2, ep);
-                                wr.putU32(3, cl);
-                                wr.putU32(4, at);
-                                wr.closeContainer();
-                                wr.putRaw(tmpBuf, tmpWr.size()); // tag 2: Data
-                                wr.closeContainer();     // /AttributeDataIB
-                            } else {
-                                // Spec 8.4.3.2: AttributeStatusIB for unsupported attributes
-                                wr.openStruct(0);        // tag 0: AttributeStatusIB
-                                wr.openList(0);          // tag 0: AttributePath
-                                wr.putU16(2, ep);
-                                wr.putU32(3, cl);
-                                wr.putU32(4, at);
-                                wr.closeContainer();
-                                wr.openStruct(1);        // tag 1: StatusIB
-                                wr.putU8(0, kStatusUnsupportedAttribute);
-                                wr.closeContainer();
-                                wr.closeContainer();     // /AttributeStatusIB
+                                uint8_t tmpBuf[256];
+                                TLVWriter tmpWr(tmpBuf, sizeof(tmpBuf));
+                                bool ok = _clusters->readAttribute(eid, cl, at, tmpWr, 2);
+
+                                wr.openStruct(kAnon);   // AttributeReportIB
+                                if (ok && !tmpWr.error()) {
+                                    wr.openStruct(1);        // tag 1: AttributeDataIB
+                                    wr.putU32(0, _clusters->dataVersion);
+                                    wr.openList(1);          // tag 1: AttributePath
+                                    wr.putU16(2, eid);
+                                    wr.putU32(3, cl);
+                                    wr.putU32(4, at);
+                                    wr.closeContainer();
+                                    wr.putRaw(tmpBuf, tmpWr.size()); // tag 2: Data
+                                    wr.closeContainer();     // /AttributeDataIB
+                                } else {
+                                    // For wildcard: skip unsupported, don't error
+                                    if (ep == 0xFFFF) { wr.closeContainer(); continue; }
+                                    // Spec 8.4.3.2: AttributeStatusIB for unsupported attributes
+                                    wr.openStruct(0);        // tag 0: AttributeStatusIB
+                                    wr.openList(0);          // tag 0: AttributePath
+                                    wr.putU16(2, eid);
+                                    wr.putU32(3, cl);
+                                    wr.putU32(4, at);
+                                    wr.closeContainer();
+                                    wr.openStruct(1);        // tag 1: StatusIB
+                                    wr.putU8(0, kStatusUnsupportedAttribute);
+                                    wr.closeContainer();
+                                    wr.closeContainer();     // /AttributeStatusIB
+                                }
+                                wr.closeContainer();     // /AttributeReportIB
                             }
-                            wr.closeContainer();     // /AttributeReportIB
                         }
                     }
                 }
@@ -441,7 +448,7 @@ void MatterIM::checkSubscription(MatterTransport& transport) {
         if (!p.active) continue;
         wr.openStruct(kAnon);
         wr.openStruct(1);
-        wr.putU32(0, 0);
+        wr.putU32(0, _clusters->dataVersion);
         wr.openList(1);
         wr.putU16(2, p.endpoint);
         wr.putU32(3, p.cluster);
