@@ -54,7 +54,3 @@ secrets.ini
 service/gateway/gateway
 service/gateway/tmp/
 
-# =============================================================================
-# Excluded experiments
-# =============================================================================
-lib/MicroProtoMatter/

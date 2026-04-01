@@ -263,12 +263,8 @@ BackgroundScanCallbacks backgroundScanCallbacks;
 void BleDeviceManager::init() {
     esp_coex_preference_set(ESP_COEX_PREFER_BALANCE);
 
-    NimBLEDevice::init("SmartGarland");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9);
-    NimBLEDevice::setSecurityAuth(true, true, true);
-    NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
-    NimBLEDevice::setSecurityInitKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
-    NimBLEDevice::setSecurityRespKey(BLE_SM_PAIR_KEY_DIST_ENC | BLE_SM_PAIR_KEY_DIST_ID);
+    // NimBLE stack init is owned by MicroBLE::init() in main.cpp.
+    // We just configure client-side concerns here.
 
     loadKnownDevices();
     updateWhitelist();

@@ -1,0 +1,10 @@
+{
+  "name": "MicroProtoMatter",
+  "version": "0.1.0",
+  "description": "Matter protocol implementation for ESP32 - TLV, SPAKE2+, CASE, Interaction Model",
+  "build": { "srcDir": "src" },
+  "dependencies": {
+    "MicroProto": "*",
+    "microlog": "*"
+  }
+}

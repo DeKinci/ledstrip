@@ -19,6 +19,7 @@
 #endif
 #include "ble/BleDeviceManager.hpp"
 #include "gateway/GatewayClient.h"
+#include <MicroBLE.h>
 #include <MicroLog.h>
 #include <MicroLogProto.h>
 
@@ -53,6 +54,7 @@ void setup() {
     Serial.printf("1. Boot: Free heap: %lu bytes\n", ESP.getFreeHeap());
 
     // Initialize BLE FIRST (before WiFi) - they share the radio
+    MicroBLE::init("SmartGarland");
     BleDeviceManager::init();
 
     // Initialize MicroProto controller + transports

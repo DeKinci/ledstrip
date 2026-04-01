@@ -1,0 +1,8 @@
+{
+  "name": "matter-protocol",
+  "firmware": "test_matter",
+  "board": "seeed_xiao_esp32s3",
+  "capabilities": ["http", "udp"],
+  "timeout": 120000,
+  "testTimeout": 15000
+}

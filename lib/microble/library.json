@@ -1,0 +1,7 @@
+{
+  "name": "microble",
+  "version": "0.1.0",
+  "description": "Shared BLE GATT server infrastructure for ESP32 (NimBLE)",
+  "frameworks": "arduino",
+  "platforms": "espressif32"
+}
