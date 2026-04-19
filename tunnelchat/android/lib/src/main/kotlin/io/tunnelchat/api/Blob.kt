@@ -46,22 +46,19 @@ data class BlobArrival(
     val senderId: SenderId,
     val bytes: ByteArray,
     val hash: ByteArray,
-    val tag: String?,
 ) {
     override fun equals(other: Any?): Boolean =
         other is BlobArrival &&
             blobId == other.blobId &&
             senderId == other.senderId &&
             bytes.contentEquals(other.bytes) &&
-            hash.contentEquals(other.hash) &&
-            tag == other.tag
+            hash.contentEquals(other.hash)
 
     override fun hashCode(): Int {
         var r = blobId.hashCode()
         r = 31 * r + senderId.hashCode()
         r = 31 * r + bytes.contentHashCode()
         r = 31 * r + hash.contentHashCode()
-        r = 31 * r + (tag?.hashCode() ?: 0)
         return r
     }
 }

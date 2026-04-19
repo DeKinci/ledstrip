@@ -73,7 +73,7 @@ class Tunnelchat(context: Context, config: TunnelchatConfig) : Closeable {
     fun messageHistory(sender: SenderId, fromSeq: UShort? = null): Flow<MessageEnvelope>
 
     // Blob transport (raw bytes)
-    suspend fun sendBlob(bytes: ByteArray, tag: String? = null): BlobHandle
+    suspend fun sendBlob(bytes: ByteArray): BlobHandle
     val incomingBlobs: SharedFlow<BlobArrival>                             // completed, receiver-CRC-verified
     val incomingBlobsInFlight: StateFlow<Map<BlobId, BlobReceiveProgress>> // live partial state
 
@@ -219,7 +219,7 @@ data class BlobReceiveProgress(
 )
 
 /** Completed, CRC-verified reassembly. `hash` is receiver-local truth (e.g., SHA-256). */
-data class BlobArrival(val blobId: BlobId, val senderId: SenderId, val bytes: ByteArray, val hash: ByteArray, val tag: String?)
+data class BlobArrival(val blobId: BlobId, val senderId: SenderId, val bytes: ByteArray, val hash: ByteArray)
 
 data class EchoResult(val rttMs: Long, val pingId: UInt)
 ```

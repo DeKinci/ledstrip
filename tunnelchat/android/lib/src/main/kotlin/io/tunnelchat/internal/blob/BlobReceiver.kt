@@ -106,7 +106,6 @@ internal class BlobReceiver(
                         senderId = senderId,
                         bytes = reassembled,
                         hash = hash,
-                        tag = null,
                     )
                 )
             }

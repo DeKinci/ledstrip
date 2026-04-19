@@ -14,7 +14,6 @@ import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.security.MessageDigest
@@ -56,7 +55,6 @@ class BlobReceiverTest {
         assertEquals(sender, a.senderId)
         assertArrayEquals(payload, a.bytes)
         assertArrayEquals(sha256(payload), a.hash)
-        assertNull(a.tag)
         assertTrue(rx.partialsSnapshot().isEmpty())
     }
 

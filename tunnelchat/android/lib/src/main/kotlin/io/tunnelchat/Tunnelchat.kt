@@ -69,7 +69,7 @@ class Tunnelchat(
         TODO("Phase 10")
 
     // ── Blob transport ────────────────────────────────────────────────────────
-    suspend fun sendBlob(bytes: ByteArray, tag: String? = null): BlobHandle = TODO("Phase 10")
+    suspend fun sendBlob(bytes: ByteArray): BlobHandle = TODO("Phase 10")
 
     val incomingBlobs: SharedFlow<BlobArrival>
         get() = TODO("Phase 10")
