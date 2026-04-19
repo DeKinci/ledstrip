@@ -89,6 +89,9 @@ per entry (5 bytes):
 
 With 4 abonents: 1 + 4×5 = 21 bytes.
 
+> **Note:** the `StateResp` entry sent over BLE (0x80) is a *different* 8-byte shape —
+> see the BLE section below. The 5-byte form above is the LoRa-side digest only.
+
 ### SyncRequest Payload
 
 ```
@@ -162,10 +165,21 @@ App communicates via BLE NUS (Nordic UART Service). First byte is command type.
 
 | Resp | Value | Payload | Trigger |
 |------|-------|---------|---------|
-| StateResp | 0x80 | `[count:1][entries:N]` | Response to GetState |
+| StateResp | 0x80 | `[count:1][entries:N]` — each entry 8 B (see below) | Response to GetState |
 | MessageResp | 0x81 | `[senderId:1][seq:2][ts:4][type:1][payload:N]` | Response to GetMessages |
 | IncomingMsg | 0x82 | same as MessageResp | Push: new message arrived via LoRa |
-| PresenceEvent | 0x83 | `[senderId:1][presence:1]` | Push: presence state changed |
+| PresenceEvent | 0x83 | `[senderId:1][presence:1]` — presence: 0=online, 1=stale, 2=offline | Push: presence state changed |
+| SelfInfoResp | 0x84 | `[deviceId:1][clock:4][activeSenders:1][bootCount:4]` (11 B total incl. resp byte) | Response to GetSelfInfo |
+
+#### StateResp entry (8 bytes each)
+
+```
+[senderId:1][highSeq:2][locSeq:2][nodeA:1][nodeB:1][presence:1]
+```
+- `highSeq`, `locSeq`: big-endian
+- `presence`: same encoding as `PresenceEvent` (0=online, 1=stale, 2=offline)
+
+Source of truth: `src/relay.cpp` `bleGetState()` / `bleGetSelfInfo()`.
 
 ## Data Storage
 
