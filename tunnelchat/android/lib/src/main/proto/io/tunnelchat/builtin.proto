@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package io.tunnelchat.builtin;
+
+option java_package = "io.tunnelchat.builtin";
+option java_multiple_files = true;
+
+// Schema ID 1. Ping probe. Originator sends; peers auto-reply with Pong.
+message Echo {
+    uint32 ping_id = 1;
+    uint32 origin_ts = 2;  // unix seconds, originator's clock
+}
+
+// Schema ID 2. Reply to Echo. Carries origin_ts verbatim for RTT.
+message Pong {
+    uint32 ping_id = 1;
+    uint32 origin_ts = 2;
+}
