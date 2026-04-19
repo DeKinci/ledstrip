@@ -87,3 +87,18 @@ internal fun readU32Be(buf: ByteArray, offset: Int): UInt {
     val b3 = (buf[offset + 3].toInt() and 0xFF).toLong()
     return ((b0 shl 24) or (b1 shl 16) or (b2 shl 8) or b3).toUInt()
 }
+
+internal fun writeU64Be(out: ByteArray, offset: Int, value: ULong) {
+    val v = value.toLong()
+    for (i in 0 until 8) {
+        out[offset + i] = ((v ushr ((7 - i) * 8)) and 0xFF).toByte()
+    }
+}
+
+internal fun readU64Be(buf: ByteArray, offset: Int): ULong {
+    var v = 0L
+    for (i in 0 until 8) {
+        v = (v shl 8) or (buf[offset + i].toInt() and 0xFF).toLong()
+    }
+    return v.toULong()
+}
