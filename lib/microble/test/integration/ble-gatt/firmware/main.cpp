@@ -26,8 +26,8 @@ static const char* TAG = "TestBLE";
 #define TEST_RX_CHAR_UUID  "aaa10002-f5a3-4aa0-b726-5d1be14a1d00"
 #define TEST_TX_CHAR_UUID  "aaa10003-f5a3-4aa0-b726-5d1be14a1d00"
 
-static constexpr uint8_t MAX_TEST_CLIENTS = 4;
-static constexpr size_t MAX_MSG_SIZE = 2048;
+static constexpr uint8_t MAX_TEST_CLIENTS = MICROBLE_MAX_CLIENTS;
+static constexpr size_t MAX_MSG_SIZE = MICROBLE_MAX_MSG_SIZE;
 
 // Stats
 static uint32_t msgRecvCount = 0;
@@ -39,7 +39,7 @@ static uint32_t connectCount = 0;
 static uint32_t disconnectCount = 0;
 
 // Message service
-static MicroBLE::BleMessageService<MAX_MSG_SIZE, MAX_TEST_CLIENTS> msgService;
+static MicroBLE::BleMessageService msgService;
 
 // Echo handler
 class EchoHandler : public MicroBLE::MessageHandler {

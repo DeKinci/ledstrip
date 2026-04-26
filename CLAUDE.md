@@ -344,6 +344,10 @@ pio device monitor --baud 115200
 - Reliability: 100% success rate under normal conditions
 - WebSocket must stay responsive during HTTP handling
 
+## Hardware Reference
+
+- [XIAO ESP32-S3 Pinout](docs/xiao-esp32s3-pinout.md) — Pin-to-GPIO mapping, bus defaults, special pins
+
 ## Board Configurations
 
 - **seeed_xiao_esp32s3** - Primary development board (8MB flash)

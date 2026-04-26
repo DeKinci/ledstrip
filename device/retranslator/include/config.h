@@ -1,5 +1,7 @@
 #pragma once
 
+#include <XiaoPins.h>
+
 // --- Device Identity ---
 // Each device MUST have a unique ID. Abonents: 0x01-0x7F, Retranslators: 0x80-0xFE
 #ifndef DEVICE_ID
@@ -11,25 +13,26 @@
 #define NODE_TYPE 0
 #endif
 
-// --- E220 LoRa Module Pins (UART) ---
+// --- E220 LoRa Module Pins (XIAO S3 → E220) ---
+// D0 → M0, D1 → M1, D2 → E220 RX0, D3 → E220 TX0, D4 → AUX
 #ifndef LORA_TX_PIN
-#define LORA_TX_PIN 43
+#define LORA_TX_PIN XIAO_D2   // ESP32 TX → E220 RX0
 #endif
 
 #ifndef LORA_RX_PIN
-#define LORA_RX_PIN 44
+#define LORA_RX_PIN XIAO_D3   // E220 TX0 → ESP32 RX
 #endif
 
 #ifndef LORA_M0_PIN
-#define LORA_M0_PIN 1
+#define LORA_M0_PIN XIAO_D0
 #endif
 
 #ifndef LORA_M1_PIN
-#define LORA_M1_PIN 2
+#define LORA_M1_PIN XIAO_D1
 #endif
 
 #ifndef LORA_AUX_PIN
-#define LORA_AUX_PIN 3
+#define LORA_AUX_PIN XIAO_D4
 #endif
 
 // --- LoRa UART ---
@@ -81,6 +84,7 @@
 #define BLE_SERVICE_UUID        "6e400001-b5a3-f393-e0a9-e50e24dcca9e"
 #define BLE_RX_CHARACTERISTIC   "6e400002-b5a3-f393-e0a9-e50e24dcca9e"
 #define BLE_TX_CHARACTERISTIC   "6e400003-b5a3-f393-e0a9-e50e24dcca9e"
+#define BLE_STATS_CHARACTERISTIC "6e400004-b5a3-f393-e0a9-e50e24dcca9e"
 
 // --- BLE Device Name ---
 #ifndef BLE_DEVICE_NAME

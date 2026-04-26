@@ -16,8 +16,7 @@ namespace MicroProto {
 class MicroProtoBleServer : public MicroProtoTransport,
                             public MicroBLE::MessageHandler {
 public:
-    static constexpr uint8_t MAX_CLIENTS = 3;
-    static constexpr size_t REASSEMBLY_SIZE = 4096;
+    static constexpr uint8_t MAX_CLIENTS = MICROBLE_MAX_CLIENTS;
 
     void begin(MicroProtoController* controller);
     void loop();
@@ -41,7 +40,7 @@ public:
 private:
     MicroProtoController* _controller = nullptr;
     uint8_t _clientIdOffset = 0;
-    MicroBLE::BleMessageService<REASSEMBLY_SIZE, MAX_CLIENTS> _msg;
+    MicroBLE::BleMessageService _msg;
 };
 
 } // namespace MicroProto

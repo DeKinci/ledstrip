@@ -30,6 +30,8 @@ enum class MsgType : uint8_t {
     Beacon       = 0x10,
     Digest       = 0x11,
     SyncRequest  = 0x12,
+    Ping         = 0x20,
+    Pong         = 0x21,
 };
 
 enum class Presence : uint8_t {

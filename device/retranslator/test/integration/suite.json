@@ -1,0 +1,9 @@
+{
+  "name": "retranslator-lora-sync",
+  "firmware": ["test_board_a", "test_board_b"],
+  "board": "seeed_xiao_esp32s3",
+  "runner": "pytest",
+  "capabilities": ["ble", "lora"],
+  "timeout": 300000,
+  "testTimeout": 60000
+}

@@ -96,9 +96,12 @@ size_t bleFragmentSend(const uint8_t* data, size_t length, uint16_t mtuPayload, 
  *   2. If feed() returns true, the complete message is in buffer()/length()
  *   3. Process the message, then call reset()
  *
- * Template parameter MaxSize is the maximum reassembled message size.
+ * Max size configured via MICROBLE_MAX_MSG_SIZE (default 4096).
  */
-template <size_t MaxSize>
+#ifndef MICROBLE_MAX_MSG_SIZE
+#define MICROBLE_MAX_MSG_SIZE 4096
+#endif
+
 class BleReassembler {
 public:
     /**
@@ -127,7 +130,7 @@ public:
         }
 
         // Append payload
-        if (_length + payloadLen > MaxSize) {
+        if (_length + payloadLen > MICROBLE_MAX_MSG_SIZE) {
             // Overflow — discard this message
             _active = false;
             _length = 0;
@@ -154,7 +157,7 @@ public:
     }
 
 private:
-    uint8_t _buffer[MaxSize] = {};
+    uint8_t _buffer[MICROBLE_MAX_MSG_SIZE] = {};
     size_t _length = 0;
     bool _active = false;
 };

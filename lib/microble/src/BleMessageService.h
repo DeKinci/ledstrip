@@ -31,12 +31,22 @@ public:
 // RX: incoming writes are reassembled, queued cross-task, and delivered
 //     as complete messages via MessageHandler::onMessage() from loop().
 //
-// Template parameters:
-//   MaxMessageSize — max reassembled message size per client
-//   MaxClients     — max concurrent BLE connections
-//   QueueSize      — RX signal ring buffer depth
+// Configurable via defines (set before including or via build_flags):
+//   MICROBLE_MAX_MSG_SIZE  — max reassembled message size per client (default 4096)
+//   MICROBLE_MAX_CLIENTS   — max concurrent BLE connections (default 3)
+//   MICROBLE_QUEUE_SIZE    — RX signal ring buffer depth (default 4)
 // ---------------------------------------------------------------------------
-template <size_t MaxMessageSize = 4096, uint8_t MaxClients = 3, uint8_t QueueSize = 4>
+
+// MICROBLE_MAX_MSG_SIZE defined in BleFragmentation.h
+
+#ifndef MICROBLE_MAX_CLIENTS
+#define MICROBLE_MAX_CLIENTS 3
+#endif
+
+#ifndef MICROBLE_QUEUE_SIZE
+#define MICROBLE_QUEUE_SIZE 4
+#endif
+
 class BleMessageService : public GattHandler {
 public:
     static constexpr uint8_t BACKPRESSURE_RETRIES = 10;
@@ -53,7 +63,7 @@ public:
 
     // TX: auto-fragments and sends
     void sendMessage(uint8_t slot, const uint8_t* data, size_t len) {
-        if (slot >= MaxClients || !_gatt.isConnected(slot)) return;
+        if (slot >= MICROBLE_MAX_CLIENTS || !_gatt.isConnected(slot)) return;
         uint16_t maxPayload = payloadSize(slot);
 
         bleFragmentSend(data, len, maxPayload, [&](const uint8_t* frag, size_t fragLen) {
@@ -81,7 +91,7 @@ public:
     }
 
     void onDisconnect(uint8_t slot) override {
-        if (slot < MaxClients) {
+        if (slot < MICROBLE_MAX_CLIENTS) {
             _clients[slot].reassembler.reset();
             _clients[slot].messageReady.store(false, std::memory_order_relaxed);
         }
@@ -93,7 +103,7 @@ public:
     }
 
     void onWrite(uint8_t slot, const uint8_t* data, size_t len) override {
-        if (slot >= MaxClients) return;
+        if (slot >= MICROBLE_MAX_CLIENTS) return;
         auto& client = _clients[slot];
 
         // Backpressure: wait if main task hasn't consumed previous message
@@ -112,7 +122,7 @@ public:
         // Queue signal for main task
         for (uint8_t i = 0; i <= BACKPRESSURE_RETRIES; i++) {
             uint8_t head = _rxHead.load(std::memory_order_relaxed);
-            uint8_t next = (head + 1) % QueueSize;
+            uint8_t next = (head + 1) % MICROBLE_QUEUE_SIZE;
             if (next != _rxTail.load(std::memory_order_acquire)) {
                 _rxQueue[head] = slot;
                 _rxHead.store(next, std::memory_order_release);
@@ -139,7 +149,7 @@ private:
                 client.messageReady.store(false, std::memory_order_release);
             }
 
-            tail = (tail + 1) % QueueSize;
+            tail = (tail + 1) % MICROBLE_QUEUE_SIZE;
             _rxTail.store(tail, std::memory_order_release);
         }
     }
@@ -148,12 +158,12 @@ private:
     BleGattService _gatt;
 
     struct ClientState {
-        BleReassembler<MaxMessageSize> reassembler;
+        BleReassembler reassembler;
         std::atomic<bool> messageReady{false};
     };
-    std::array<ClientState, MaxClients> _clients = {};
+    std::array<ClientState, MICROBLE_MAX_CLIENTS> _clients = {};
 
-    std::array<uint8_t, QueueSize> _rxQueue = {};
+    std::array<uint8_t, MICROBLE_QUEUE_SIZE> _rxQueue = {};
     std::atomic<uint8_t> _rxHead{0};
     std::atomic<uint8_t> _rxTail{0};
 };

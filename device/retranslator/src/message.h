@@ -162,6 +162,9 @@ private:
             case MsgType::SyncRequest:
                 if (payloadLen < 1) return false;
                 return payloadLen == 1 + payload[0] * 5;
+            case MsgType::Ping:
+            case MsgType::Pong:
+                return payloadLen >= 2;  // at least ping_seq:2
             default:
                 return false;
         }

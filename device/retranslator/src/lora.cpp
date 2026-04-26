@@ -50,15 +50,24 @@ bool LoRa::send(const uint8_t* data, size_t len) {
 size_t LoRa::receive(uint8_t* buf, size_t maxLen) {
     if (!_serial) return 0;
 
-    size_t available = _serial->available();
-    if (available == 0) return 0;
+    // Read any available bytes into internal buffer
+    while (_serial->available() > 0 && _rxLen < LORA_RX_BUF_SIZE) {
+        _rxBuf[_rxLen++] = _serial->read();
+        _lastByteMs = millis();
+    }
 
-    // Wait briefly for full packet to arrive
-    delay(5);
-    available = _serial->available();
+    if (_rxLen == 0) return 0;
 
-    size_t toRead = (available > maxLen) ? maxLen : available;
-    return _serial->readBytes(buf, toRead);
+    // Packet complete when silence gap exceeded or buffer full
+    if (millis() - _lastByteMs < LORA_PACKET_GAP_MS && _rxLen < LORA_RX_BUF_SIZE) {
+        return 0;  // Still accumulating
+    }
+
+    // Return accumulated packet
+    size_t toReturn = (_rxLen > maxLen) ? maxLen : _rxLen;
+    memcpy(buf, _rxBuf, toReturn);
+    _rxLen = 0;
+    return toReturn;
 }
 
 #endif

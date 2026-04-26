@@ -72,7 +72,7 @@ Deduplication is by `(sender_id, seq)` pair. No separate msg_id needed.
 ```
 [state_hash:2][node_type:1]
 ```
-- `state_hash`: XOR of `(sender_id ^ seqHi ^ seqLo)` across all stored entries. Changes when any new data is merged.
+- `state_hash`: commutative sum of per-sender hashes: `sender_id * 251 + highSeq + locSeq * 7`. Changes when any new data is merged. Addition makes the hash order-independent.
 - `node_type`: 0 = retranslator, 1 = abonent
 
 Sent every 10 seconds. Not stored, not relayed.

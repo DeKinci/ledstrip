@@ -1,5 +1,7 @@
 #ifdef NATIVE_TEST
 
+#define MICROBLE_MAX_MSG_SIZE 1024
+
 #include <unity.h>
 #include <BleFragmentation.h>
 #include <cstring>
@@ -135,7 +137,7 @@ void test_frag_empty_message() {
 // =========== BleReassembler Tests ===========
 
 void test_reasm_complete_message() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag[] = {BleFragHeader::COMPLETE, 0x01, 0x02, 0x03};
     TEST_ASSERT_TRUE(r.feed(frag, sizeof(frag)));
     TEST_ASSERT_EQUAL(3, r.length());
@@ -143,7 +145,7 @@ void test_reasm_complete_message() {
 }
 
 void test_reasm_two_fragments() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag1[] = {BleFragHeader::START, 0x01, 0x02};
     uint8_t frag2[] = {BleFragHeader::END, 0x03, 0x04};
     TEST_ASSERT_FALSE(r.feed(frag1, sizeof(frag1)));
@@ -152,7 +154,7 @@ void test_reasm_two_fragments() {
 }
 
 void test_reasm_three_fragments() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag1[] = {BleFragHeader::START, 0xAA};
     uint8_t frag2[] = {0x00, 0xBB};  // Middle
     uint8_t frag3[] = {BleFragHeader::END, 0xCC};
@@ -163,7 +165,7 @@ void test_reasm_three_fragments() {
 }
 
 void test_reasm_start_resets_previous() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag1[] = {BleFragHeader::START, 0x01};
     uint8_t frag2[] = {BleFragHeader::START, 0x02};  // New start
     uint8_t frag3[] = {BleFragHeader::END, 0x03};
@@ -175,7 +177,7 @@ void test_reasm_start_resets_previous() {
 }
 
 void test_reasm_middle_without_start_discarded() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag[] = {0x00, 0x01, 0x02};
     TEST_ASSERT_FALSE(r.feed(frag, sizeof(frag)));
     uint8_t end[] = {BleFragHeader::END, 0x03};
@@ -183,21 +185,33 @@ void test_reasm_middle_without_start_discarded() {
 }
 
 void test_reasm_overflow_discards() {
-    BleReassembler<4> r;
-    uint8_t frag1[] = {BleFragHeader::START, 0x01, 0x02, 0x03};
+    // MICROBLE_MAX_MSG_SIZE is 1024 — send fragments that exceed it
+    BleReassembler r;
+    // First fragment: 512 bytes of payload
+    uint8_t frag1[1 + 512];
+    frag1[0] = BleFragHeader::START;
+    memset(frag1 + 1, 0xAA, 512);
     TEST_ASSERT_FALSE(r.feed(frag1, sizeof(frag1)));
-    uint8_t frag2[] = {BleFragHeader::END, 0x04, 0x05};
-    TEST_ASSERT_FALSE(r.feed(frag2, sizeof(frag2)));  // Overflow
+
+    // Second fragment: another 512 bytes
+    uint8_t frag2[1 + 512];
+    frag2[0] = 0x00;  // middle
+    memset(frag2 + 1, 0xBB, 512);
+    TEST_ASSERT_FALSE(r.feed(frag2, sizeof(frag2)));
+
+    // Third fragment: 1 more byte would exceed 1024 — overflow
+    uint8_t frag3[] = {BleFragHeader::END, 0xCC};
+    TEST_ASSERT_FALSE(r.feed(frag3, sizeof(frag3)));
 }
 
 void test_reasm_empty_fragment() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t empty[] = {};
     TEST_ASSERT_FALSE(r.feed(empty, 0));
 }
 
 void test_reasm_reset_allows_reuse() {
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag[] = {BleFragHeader::COMPLETE, 0xAA};
     TEST_ASSERT_TRUE(r.feed(frag, sizeof(frag)));
     TEST_ASSERT_EQUAL(1, r.length());
@@ -213,7 +227,7 @@ void test_reasm_reset_allows_reuse() {
 
 void test_reasm_sequential_messages() {
     // Feed two complete messages back-to-back (with reset between)
-    BleReassembler<256> r;
+    BleReassembler r;
 
     uint8_t msg1[] = {BleFragHeader::COMPLETE, 0x01, 0x02};
     TEST_ASSERT_TRUE(r.feed(msg1, sizeof(msg1)));
@@ -228,7 +242,7 @@ void test_reasm_sequential_messages() {
 
 void test_reasm_header_only_complete() {
     // COMPLETE with zero-length payload
-    BleReassembler<256> r;
+    BleReassembler r;
     uint8_t frag[] = {BleFragHeader::COMPLETE};
     TEST_ASSERT_TRUE(r.feed(frag, 1));
     TEST_ASSERT_EQUAL(0, r.length());
@@ -238,7 +252,7 @@ void test_reasm_header_only_complete() {
 
 void test_frag_roundtrip_small() {
     uint8_t original[] = {0xDE, 0xAD, 0xBE, 0xEF};
-    BleReassembler<256> r;
+    BleReassembler r;
 
     bleFragmentSend(original, sizeof(original), 20, [&](const uint8_t* data, size_t len) {
         r.feed(data, len);
@@ -252,7 +266,7 @@ void test_frag_roundtrip_large() {
     uint8_t original[100];
     for (int i = 0; i < 100; i++) original[i] = i;
 
-    BleReassembler<256> r;
+    BleReassembler r;
     size_t fragCount = bleFragmentSend(original, sizeof(original), 10, [&](const uint8_t* data, size_t len) {
         r.feed(data, len);
     });
@@ -266,7 +280,7 @@ void test_frag_roundtrip_realistic_mtu() {
     uint8_t original[200];
     for (int i = 0; i < 200; i++) original[i] = i & 0xFF;
 
-    BleReassembler<512> r;
+    BleReassembler r;
     size_t fragCount = bleFragmentSend(original, sizeof(original), 244, [&](const uint8_t* data, size_t len) {
         r.feed(data, len);
     });
@@ -280,7 +294,7 @@ void test_frag_roundtrip_exceeds_mtu() {
     uint8_t original[500];
     for (int i = 0; i < 500; i++) original[i] = i & 0xFF;
 
-    BleReassembler<1024> r;
+    BleReassembler r;
     size_t fragCount = bleFragmentSend(original, sizeof(original), 244, [&](const uint8_t* data, size_t len) {
         r.feed(data, len);
     });
@@ -295,7 +309,7 @@ void test_frag_roundtrip_min_mtu() {
     uint8_t original[10];
     for (int i = 0; i < 10; i++) original[i] = i;
 
-    BleReassembler<64> r;
+    BleReassembler r;
     size_t fragCount = bleFragmentSend(original, sizeof(original), 2, [&](const uint8_t* data, size_t len) {
         r.feed(data, len);
     });
